@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Dashboard</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Fallback colors if Bootstrap doesn't load */
+        .bg-primary { background-color: #0d6efd !important; }
+        .bg-success { background-color: #198754 !important; }
+        .bg-info { background-color: #0dcaf0 !important; }
+        .bg-danger { background-color: #dc3545 !important; }
+        .bg-warning { background-color: #ffc107 !important; }
+        .text-white { color: white !important; }
+    </style>
+    
+    <!-- Bootstrap JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Fallback Bootstrap JavaScript -->
+    <script>
+        // Fallback for Bootstrap functionality
+        if (typeof bootstrap === 'undefined') {
+            console.warn('⚠️ Bootstrap not loaded, using fallback');
+            
+            // Simple tooltip fallback
+            document.addEventListener('DOMContentLoaded', function() {
+                const tooltipElements = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+                tooltipElements.forEach(function(element) {
+                    element.addEventListener('mouseenter', function() {
+                        const title = this.getAttribute('title');
+                        if (title) {
+                            // Create simple tooltip
+                            const tooltip = document.createElement('div');
+                            tooltip.className = 'simple-tooltip';
+                            tooltip.textContent = title;
+                            tooltip.style.cssText = 'position: absolute; background: black; color: white; padding: 5px; border-radius: 3px; z-index: 1000; font-size: 12px;';
+                            document.body.appendChild(tooltip);
+                            
+                            const rect = this.getBoundingClientRect();
+                            tooltip.style.left = rect.left + 'px';
+                            tooltip.style.top = (rect.top - tooltip.offsetHeight - 5) + 'px';
+                            
+                            this._tooltip = tooltip;
+                        }
+                    });
+                    
+                    element.addEventListener('mouseleave', function() {
+                        if (this._tooltip) {
+                            document.body.removeChild(this._tooltip);
+                            this._tooltip = null;
+                        }
+                    });
+                });
+            });
+        }
+    </script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-robot"></i> Trading Bot Dashboard
+            </span>
+            <div class="d-flex">
+                <span class="navbar-text me-3" id="last-update">
+                    <i class="fas fa-clock"></i> Laatste Update: <span id="last-update-time">Laden...</span>
+                </span>
+                <button class="btn btn-outline-light btn-sm" onclick="syncNow()">
+                    <i class="fas fa-sync-alt"></i> Nu Synchroniseren
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <!-- Top Row - Critical Metrics -->
+        <div class="row mb-4">
+            <div class="col-md-3 mb-3">
+                <div class="card bg-primary text-white h-100">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">💰 Portfolio Waarde</h6>
+                            <small class="opacity-75">Totaal</small>
+                        </div>
+                        <h3 class="mb-0" id="portfolio-value">€1.000,00</h3>
+                        <small class="opacity-75 mt-auto">Startkapitaal: €1.000</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3 mb-3">
+                <div class="card bg-success text-white h-100">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">📈 Dagelijkse P&L</h6>
+                            <small class="opacity-75">Vandaag</small>
+                        </div>
+                        <h3 class="mb-0" id="daily-pnl">€0,00</h3>
+                        <small class="opacity-75 mt-auto">Geen trades vandaag</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3 mb-3">
+                <div class="card bg-info text-white h-100">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">🔄 Open Posities</h6>
+                            <small class="opacity-75">Actief</small>
+                        </div>
+                        <h3 class="mb-0" id="open-positions">0</h3>
+                        <small class="opacity-75 mt-auto">Geen actieve trades</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3 mb-3">
+                <div class="card bg-danger text-white h-100">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">⚠️ Risico Score</h6>
+                            <small class="opacity-75">Niveau</small>
+                        </div>
+                        <h3 class="mb-0" id="risk-score">3.5</h3>
+                        <small class="opacity-75 mt-auto">Gemiddeld risico</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle Row - Performance Metrics -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Win Rate</h6>
+                                <h4 id="win-rate">0%</h4>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-percentage fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Sharpe Ratio</h6>
+                                <h4 id="sharpe-ratio">0.0</h4>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-chart-bar fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">ML Confidence</h6>
+                                <h4 id="ml-confidence">0%</h4>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-brain fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card bg-secondary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Inference Latency</h6>
+                                <h4 id="inference-latency">0ms</h4>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-tachometer-alt fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Row - System Health -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">API Status</h6>
+                                <h6 id="api-status">Connected</h6>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-plug fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Data Freshness</h6>
+                                <h6 id="data-freshness">2 min</h6>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-clock fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card bg-warning text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Memory Usage</h6>
+                                <h6 id="memory-usage">65%</h6>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-memory fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card bg-danger text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Alerts</h6>
+                                <h6 id="total-alerts">0</h6>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row mb-4">
+            <!-- Equity Curve -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-chart-line"></i> Vermogenscurve</h5>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="tooltip" data-bs-placement="left" title="📈 Vermogenscurve:&#10;• Toont portfoliowaarde over tijd&#10;• Startkapitaal: €1.000&#10;• Demo mode: Geen echte trades&#10;• Updates elke 5 minuten">
+                                <i class="fas fa-info-circle fa-lg text-primary"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#equity-curve-collapse" aria-expanded="true">
+                                <i class="fas fa-chevron-down fa-lg text-primary"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="collapse show" id="equity-curve-collapse">
+                        <div class="card-body">
+                            <canvas id="equityChart" height="100"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Portfolio Overview -->
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-wallet"></i> Portfolio Overzicht</h5>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="tooltip" data-bs-placement="left" title="📊 Portfolio Overzicht:&#10;• Totaal Saldo: Huidige portfoliowaarde&#10;• Beschikbaar Saldo: Vrij beschikbaar voor trading&#10;• Open Posities: Aantal actieve trades&#10;• Totaal P&L: Totale winst/verlies sinds start">
+                                <i class="fas fa-info-circle fa-lg text-primary"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#portfolio-overview-collapse" aria-expanded="true">
+                                <i class="fas fa-chevron-down fa-lg text-primary"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="collapse show" id="portfolio-overview-collapse">
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <strong>Totaal Saldo:</strong>
+                                <span id="total-balance" class="float-end">Laden...</span>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Beschikbaar Saldo:</strong>
+                                <span id="available-balance" class="float-end">Laden...</span>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Open Posities:</strong>
+                                <span id="open-positions-detail" class="float-end">Laden...</span>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Totaal P&L:</strong>
+                                <span id="portfolio-pnl" class="float-end">Laden...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Portfolio Details Row -->
+        <div class="row mb-4">
+            <!-- Portfolio Holdings -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-coins"></i> Portfolio Bezittingen</h5>
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="Huidige cryptocurrency bezittingen en hun waarde">
+                            <i class="fas fa-info-circle fa-lg text-primary"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="portfolio-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbool</th>
+                                        <th>Kant</th>
+                                        <th>Hoeveelheid</th>
+                                        <th>Status</th>
+                                        <th>P&L</th>
+                                        <th>Saldo</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="portfolio-tbody">
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted">Portfolio data laden...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Portfolio Allocation -->
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-chart-pie"></i> Portfolio Verdeling</h5>
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="🥧 Portfolio Verdeling:&#10;• Toont verdeling van bezittingen&#10;• Cirkeldiagram met percentages&#10;• Huidige status: Geen bezittingen&#10;• Updates bij nieuwe trades">
+                            <i class="fas fa-info-circle fa-lg text-primary"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="portfolioChart"></canvas>
+                        <div id="portfolio-legend" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trading Performance Row -->
+        <div class="row mb-4">
+            <!-- Win/Loss Breakdown -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-chart-pie"></i> Win/Verlies Verdeling</h5>
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="📊 Win/Verlies Verdeling:&#10;• Toont aantal winnende vs verliezende trades&#10;• Groen: Winnende trades&#10;• Rood: Verliezende trades&#10;• Huidige status: Nog geen trades">
+                            <i class="fas fa-info-circle fa-lg text-primary"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="winLossChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Trading Stats -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-bar"></i> Trading Statistieken</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h3 id="winning-trades" class="text-success">0</h3>
+                                    <small>Winnende Trades</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h3 id="losing-trades" class="text-danger">0</h3>
+                                    <small>Verliezende Trades</small>
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h4 id="avg-win" class="text-success">$0</h4>
+                                    <small>Gemiddelde Win</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h4 id="avg-loss" class="text-danger">$0</h4>
+                                    <small>Gemiddeld Verlies</small>
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="text-center">
+                            <h4 id="profit-factor" class="text-info">0.00</h4>
+                            <small>Winst Factor</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bot Activity & Decision Making -->
+        <div class="row mb-4">
+            <!-- Bot Activity Timeline -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-brain"></i> Bot Activiteit & Besluitvorming</h5>
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="🤖 Bot Activiteit:&#10;• Uptime: Hoe lang bot actief is&#10;• Trading Beslissingen: Elke 12 uur&#10;• Volgende Trading: Tijd volgende beslissing&#10;• Activity Timeline: Recente bot acties&#10;• Status badges: Geel=Geen actie, Groen=Succes">
+                            <i class="fas fa-info-circle fa-lg text-primary"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h4 id="bot-uptime" class="text-info">0h 0m</h4>
+                                    <small>Bot Uptime</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h4 id="decision-frequency" class="text-primary">0/min</h4>
+                                    <small>Trading Beslissingen</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h4 id="next-check" class="text-warning">--:--</h4>
+                                    <small>Volgende Trading</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover" id="bot-activity-table">
+                                <thead>
+                                    <tr>
+                                        <th>Datum & Tijd</th>
+                                        <th>Actie</th>
+                                        <th>Beslissing</th>
+                                        <th>Reden</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="bot-activity-tbody">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">Bot activiteit laden...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Bot Performance Metrics -->
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-line"></i> Bot Prestaties</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between">
+                                <span id="market-analysis-label">Marktanalyse</span>
+                                <span id="market-analysis-score" class="badge bg-secondary">0%</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div id="market-analysis-bar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="market-analysis-details" class="text-muted">Loading...</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between">
+                                <span id="risk-assessment-label">Risico Beoordeling</span>
+                                <span id="risk-assessment-score" class="badge bg-secondary">0%</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div id="risk-assessment-bar" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="risk-assessment-details" class="text-muted">Loading...</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between">
+                                <span id="execution-speed-label">Data Sync Snelheid</span>
+                                <span id="execution-speed-score" class="badge bg-secondary">0%</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div id="execution-speed-bar" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="execution-speed-details" class="text-muted">Loading...</small>
+                        </div>
+                        
+                        <hr>
+                        
+                        <div class="row text-center">
+                            <div class="col-6">
+                                <h5 id="success-rate" class="text-success">0%</h5>
+                                <small>Succespercentage</small>
+                            </div>
+                            <div class="col-6">
+                                <h5 id="avg-decision-time" class="text-info">0ms</h5>
+                                <small>Gem. Beslissingstijd</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ML & AI Insights -->
+        <div class="row mb-4">
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-brain"></i> ML Model Prestaties</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 id="predictions-today" class="text-primary">24</h4>
+                                    <small class="text-muted">Voorspellingen Vandaag</small>
+                                </div>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 id="model-accuracy" class="text-success">82.3%</h4>
+                                    <small class="text-muted">Model Accuraatheid</small>
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <h6>Feature Belangrijkheid:</h6>
+                        <div id="feature-importance">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span>RSI</span>
+                                <span>25%</span>
+                            </div>
+                            <div class="progress mb-2" style="height: 6px;">
+                                <div class="progress-bar" style="width: 25%"></div>
+                            </div>
+                            <div class="d-flex justify-content-between mb-1">
+                                <span>Volume</span>
+                                <span>20%</span>
+                            </div>
+                            <div class="progress mb-2" style="height: 6px;">
+                                <div class="progress-bar bg-info" style="width: 20%"></div>
+                            </div>
+                            <div class="d-flex justify-content-between mb-1">
+                                <span>Price Change</span>
+                                <span>18%</span>
+                            </div>
+                            <div class="progress mb-2" style="height: 6px;">
+                                <div class="progress-bar bg-success" style="width: 18%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-signal"></i> Signaal Kwaliteit</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 id="signal-strength" class="text-warning">7.2</h4>
+                                    <small class="text-muted">Signaal Sterkte</small>
+                                </div>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 id="regime-status" class="text-info">Neutral</h4>
+                                    <small class="text-muted">Regime Status</small>
+                                </div>
+                            </div>
+                        </div>
+                        <hr>
+                        <h6>Universe Selectie:</h6>
+                        <div class="d-flex flex-wrap gap-1">
+                            <span class="badge bg-primary">BTC</span>
+                            <span class="badge bg-primary">ETH</span>
+                            <span class="badge bg-primary">ADA</span>
+                            <span class="badge bg-primary">DOT</span>
+                            <span class="badge bg-primary">LINK</span>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-6">
+                                <small class="text-muted">Markt Volatiliteit:</small><br>
+                                <strong id="market-volatility">Medium</strong>
+                            </div>
+                            <div class="col-6">
+                                <small class="text-muted">Trend Richting:</small><br>
+                                <strong id="trend-direction">Sideways</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Intelligence -->
+        <div class="row mb-4">
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-area"></i> Markt Overzicht</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h4 id="volatility-index" class="text-warning">6.7</h4>
+                                    <small class="text-muted">Volatiliteit Index</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h4 id="volume-analysis" class="text-info">Above Avg</h4>
+                                    <small class="text-muted">Volume Analyse</small>
+                                </div>
+                            </div>
+                        </div>
+                        <h6>Top Movers:</h6>
+                        <div id="top-movers">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><strong>BTC</strong></span>
+                                <span class="text-success">+2.3%</span>
+                                <small class="text-muted">€45M</small>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><strong>ETH</strong></span>
+                                <span class="text-danger">-1.1%</span>
+                                <small class="text-muted">€32M</small>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span><strong>ADA</strong></span>
+                                <span class="text-success">+0.8%</span>
+                                <small class="text-muted">€18M</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-shield-alt"></i> Risico Management</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h4 id="risk-rejects" class="text-danger">3</h4>
+                                    <small class="text-muted">Risico Afwijzingen</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-center">
+                                    <h4 id="daily-loss" class="text-success">€0.00</h4>
+                                    <small class="text-muted">Dagelijks Verlies</small>
+                                </div>
+                            </div>
+                        </div>
+                        <h6>Positie Groottes:</h6>
+                        <div class="row">
+                            <div class="col-4 text-center">
+                                <small class="text-muted">Max Positie:</small><br>
+                                <strong id="max-position">10%</strong>
+                            </div>
+                            <div class="col-4 text-center">
+                                <small class="text-muted">Gem. Positie:</small><br>
+                                <strong id="avg-position">5.2%</strong>
+                            </div>
+                            <div class="col-4 text-center">
+                                <small class="text-muted">Totale Exposure:</small><br>
+                                <strong id="total-exposure">15.6%</strong>
+                            </div>
+                        </div>
+                        <hr>
+                        <h6>Correlatie Matrix:</h6>
+                        <div class="row">
+                            <div class="col-4 text-center">
+                                <small class="text-muted">BTC-ETH:</small><br>
+                                <strong id="btc-eth-correlation">0.78</strong>
+                            </div>
+                            <div class="col-4 text-center">
+                                <small class="text-muted">BTC-ADA:</small><br>
+                                <strong id="btc-ada-correlation">0.65</strong>
+                            </div>
+                            <div class="col-4 text-center">
+                                <small class="text-muted">ETH-ADA:</small><br>
+                                <strong id="eth-ada-correlation">0.72</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Real-time Alerts -->
+        <div class="row mb-4">
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-exclamation-triangle"></i> Kritieke Waarschuwingen</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="critical-alerts">
+                            <div class="alert alert-info">
+                                <div class="d-flex justify-content-between">
+                                    <span><i class="fas fa-info-circle"></i> Systeem draait normaal</span>
+                                    <small class="text-muted">19:32</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-bullseye"></i> Trading Kansen</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="trading-opportunities">
+                            <div class="alert alert-warning">
+                                <div class="d-flex justify-content-between">
+                                    <span><i class="fas fa-signal"></i> Potentiële BTC setup gedetecteerd</span>
+                                    <small class="text-muted">19:02</small>
+                                </div>
+                                <small class="text-muted">Confidence: 75% - Status: Monitoring</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Decision Thresholds & Recent Decisions -->
+        <div class="row mb-4">
+            <!-- Decision Thresholds -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-sliders-h"></i> Beslisdrempels & Parameters</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row" id="decision-thresholds">
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">Prijsverandering:</small><br>
+                                <strong id="price-threshold">2.5%</strong>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">Volume:</small><br>
+                                <strong id="volume-threshold">1000</strong>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">RSI Oversold:</small><br>
+                                <strong id="rsi-oversold">30</strong>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">RSI Overbought:</small><br>
+                                <strong id="rsi-overbought">70</strong>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">Stop Loss:</small><br>
+                                <strong id="stop-loss">3%</strong>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">Take Profit:</small><br>
+                                <strong id="take-profit">5%</strong>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">Max Positie:</small><br>
+                                <strong id="max-position">10%</strong>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <small class="text-muted">Risico per Trade:</small><br>
+                                <strong id="risk-per-trade">2%</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recent Decisions -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-history"></i> Recente Besluiten</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="recent-decisions-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tijd</th>
+                                        <th>Actie</th>
+                                        <th>Beslissing</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="recent-decisions-tbody">
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted">Loading recente besluiten...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-server"></i> Systeem Status</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <strong>Pi Verbinding:</strong>
+                                <span id="pi-status" class="badge bg-secondary">Onbekend</span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Laatste Sync:</strong>
+                                <span id="last-sync">Laden...</span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Data Bestanden:</strong>
+                                <span id="data-files">0</span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Auto Vernieuwen:</strong>
+                                <span id="auto-refresh" class="badge bg-success">AAN</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v={{ range(10000, 99999) | random }}"></script>
+    
+    <!-- Dashboard Functionality -->
+    <script>
+        // Add collapse functionality using Bootstrap events
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🔧 Initializing dashboard functionality...');
+            
+            const collapseElements = document.querySelectorAll('[data-bs-toggle="collapse"]');
+            console.log('Found collapse elements:', collapseElements.length);
+            
+            collapseElements.forEach(function(element) {
+                const targetId = element.getAttribute('data-bs-target');
+                const targetElement = document.querySelector(targetId);
+                const icon = element.querySelector('i');
+                
+                if (targetElement && icon) {
+                    // Listen for Bootstrap collapse events
+                    targetElement.addEventListener('shown.bs.collapse', function() {
+                        icon.classList.remove('fa-chevron-down');
+                        icon.classList.add('fa-chevron-up');
+                        console.log('✅ Expanded:', targetId);
+                    });
+                    
+                    targetElement.addEventListener('hidden.bs.collapse', function() {
+                        icon.classList.remove('fa-chevron-up');
+                        icon.classList.add('fa-chevron-down');
+                        console.log('✅ Collapsed:', targetId);
+                    });
+                }
+            });
+            
+            console.log('✅ Dashboard functionality initialized');
+        });
+    </script>
+</body>
+</html>
