@@ -1,0 +1,1251 @@
+/**
+ * Trading Bot Dashboard - JavaScript
+ * Modular structure: domRefs, utils, state, ui
+ */
+
+// ============================================================================
+// 1) DOM REFERENCES (domRefs)
+// ============================================================================
+const domRefs = {
+    // Charts
+    equityChart: null,
+    winLossChart: null,
+    portfolioChart: null,
+    
+    // Global elements
+    globalAlert: null,
+    syncBanner: null,
+    
+    // Portfolio elements
+    portfolioValue: null,
+    totalBalance: null,
+    availableBalance: null,
+    dailyPnl: null,
+    openPositions: null,
+    portfolioTbody: null,
+    portfolioLegend: null,
+    
+    // Bot activity elements
+    botUptime: null,
+    decisionFrequency: null,
+    nextCheck: null,
+    botActivityTbody: null,
+    recentDecisionsTbody: null,
+    
+    // Performance elements
+    marketAnalysisBar: null,
+    riskAssessmentBar: null,
+    executionSpeedBar: null,
+    
+    // System elements
+    lastUpdateTime: null,
+    totalAlerts: null,
+    criticalAlerts: null,
+    tradingOpportunities: null
+};
+
+// ============================================================================
+// 2) UTILITIES (utils)
+// ============================================================================
+const utils = {
+    // Formatters
+    fmt: new Intl.NumberFormat('nl-NL'),
+    fmtCurrency: new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }),
+    
+    formatCurrency(v) { 
+        return this.isFinite(v) ? this.fmtCurrency.format(v) : '—'; 
+    },
+    
+    formatPercent(v, digits = 1) { 
+        return this.isFinite(v) ? `${v.toFixed(digits)}%` : '—'; 
+    },
+    
+    safeNumber(v, def = 0) { 
+        const n = Number(v); 
+        return Number.isFinite(n) ? n : def; 
+    },
+    
+    isFinite(v) {
+        return typeof v === 'number' && Number.isFinite(v);
+    },
+    
+    // DOM helpers
+    safeUpdateElement(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        } else {
+            console.warn(`Element with id '${id}' not found`);
+        }
+    },
+    
+    safeUpdateElements(elements) {
+        Object.entries(elements).forEach(([id, value]) => {
+            if (id && id.trim() !== '') {
+                this.safeUpdateElement(id, value);
+            }
+        });
+    },
+    
+    renderEmptyState(container, message = 'Geen data beschikbaar') {
+        if (container) {
+            container.innerHTML = `
+                <div class="p-3 text-center text-muted border rounded-3">
+                    ${message}
+                </div>`;
+        }
+    },
+    
+    ensureChartDataOrPlaceholder(chart, labels, data, placeholderLabel = 'Geen data') {
+        if (!chart) return;
+        
+        if (!data?.length || data.every(v => v === 0 || v == null)) {
+            chart.data.labels = [placeholderLabel];
+            chart.data.datasets[0].data = [1];
+            chart.data.datasets[0].backgroundColor = ['#adb5bd'];
+        } else {
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = data;
+        }
+        chart.update();
+    },
+    
+    // Error handling
+    async withTry(asyncFn, onError) {
+        try { 
+            return await asyncFn(); 
+        } catch (e) {
+            console.error(e);
+            onError?.(e);
+            if (domRefs.globalAlert) {
+                domRefs.globalAlert.innerHTML = `
+                    <div class="alert alert-warning d-flex align-items-center" role="alert">
+                        <i class="fa-solid fa-triangle-exclamation me-2"></i>
+                        <div>Kon data niet ophalen. Probeer later opnieuw.</div>
+                    </div>`;
+            }
+            return null;
+        }
+    }
+};
+
+// ============================================================================
+// 3) STATE MANAGEMENT (state)
+// ============================================================================
+const state = {
+    lastSyncAt: null, // ISO string
+    dataFreshnessMin: 0, // integer, minuten
+    system: {
+        apiConnected: false,
+        piConnected: false,
+        autoRefresh: true
+    },
+    portfolio: {},
+    positions: {},
+    ml: {},
+    risk: {},
+    alerts: []
+};
+
+// ============================================================================
+// 4) UI RENDERERS (ui)
+// ============================================================================
+const ui = {
+    renderSyncBanner() {
+        if (!domRefs.syncBanner) return;
+        
+        const last = state.lastSyncAt ? new Date(state.lastSyncAt) : null;
+        const mins = state.dataFreshnessMin;
+        
+        if (last) {
+            domRefs.syncBanner.innerHTML = `
+                Laatste update: ${last.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                <span class="text-muted ms-2">(${mins} min geleden)</span>
+            `;
+        } else {
+            domRefs.syncBanner.innerHTML = 'Nooit gesynchroniseerd';
+        }
+    },
+    
+    renderStatusBadge(element, status) {
+        if (!element) return;
+        
+        const statusMap = {
+            'online': { text: 'Online', class: 'badge bg-success' },
+            'offline': { text: 'Offline', class: 'badge bg-danger' },
+            'warning': { text: 'Warning', class: 'badge bg-warning' },
+            'error': { text: 'Error', class: 'badge bg-danger' }
+        };
+        
+        const statusInfo = statusMap[status] || statusMap['offline'];
+        element.textContent = statusInfo.text;
+        element.className = statusInfo.class;
+    }
+};
+
+// ============================================================================
+// GLOBAL VARIABLES & CONFIGURATION
+// ============================================================================
+let autoRefreshInterval = null;
+let isSyncing = false;
+const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const API_BASE = '/api';
+
+// ============================================================================
+// GLOBAL INITIALIZATION
+// ============================================================================
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Initializing Trading Bot Dashboard...');
+    
+    // Initialize DOM references
+    initializeDOMReferences();
+    
+    // Initialize Bootstrap components
+    initializeBootstrapComponents();
+    
+    // Initialize charts
+    initializeCharts();
+    
+    // Load initial data
+    loadAllData();
+    
+    // Start auto-refresh
+    startAutoRefresh();
+    
+    console.log('✅ Dashboard initialized');
+});
+
+/**
+ * Initialize DOM references
+ */
+function initializeDOMReferences() {
+    // Global elements
+    domRefs.globalAlert = document.getElementById('global-alert');
+    domRefs.syncBanner = document.getElementById('sync-banner');
+    
+    // Portfolio elements
+    domRefs.portfolioValue = document.getElementById('portfolio-value');
+    domRefs.totalBalance = document.getElementById('total-balance');
+    domRefs.availableBalance = document.getElementById('available-balance');
+    domRefs.dailyPnl = document.getElementById('daily-pnl');
+    domRefs.openPositions = document.getElementById('open-positions');
+    domRefs.portfolioTbody = document.getElementById('portfolio-tbody');
+    domRefs.portfolioLegend = document.getElementById('portfolio-legend');
+    
+    // Bot activity elements
+    domRefs.botUptime = document.getElementById('bot-uptime');
+    domRefs.decisionFrequency = document.getElementById('decision-frequency');
+    domRefs.nextCheck = document.getElementById('next-check');
+    domRefs.botActivityTbody = document.getElementById('bot-activity-tbody');
+    domRefs.recentDecisionsTbody = document.getElementById('recent-decisions-tbody');
+    
+    // Performance elements
+    domRefs.marketAnalysisBar = document.getElementById('market-analysis-bar');
+    domRefs.riskAssessmentBar = document.getElementById('risk-assessment-bar');
+    domRefs.executionSpeedBar = document.getElementById('execution-speed-bar');
+    
+    // System elements
+    domRefs.lastUpdateTime = document.getElementById('last-update-time');
+    domRefs.totalAlerts = document.getElementById('total-alerts');
+    domRefs.criticalAlerts = document.getElementById('critical-alerts');
+    domRefs.tradingOpportunities = document.getElementById('trading-opportunities');
+    
+    console.log('✅ DOM references initialized');
+}
+
+/**
+ * Initialize Bootstrap components
+ */
+function initializeBootstrapComponents() {
+    // Tooltips
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        new bootstrap.Tooltip(el);
+    });
+    
+    // Collapse icons (chevron omdraaien)
+    document.querySelectorAll('.collapse').forEach(el => {
+        el.addEventListener('shown.bs.collapse', () => {
+            const icon = document.querySelector(`[data-collapse-target="#${el.id}"] i`);
+            if (icon) {
+                icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+            }
+        });
+        el.addEventListener('hidden.bs.collapse', () => {
+            const icon = document.querySelector(`[data-collapse-target="#${el.id}"] i`);
+            if (icon) {
+                icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+            }
+        });
+    });
+    
+    console.log('✅ Bootstrap components initialized');
+}
+
+// ============================================================================
+// CHART INITIALIZATION
+// ============================================================================
+
+/**
+ * Initialize Chart.js charts
+ */
+function initializeCharts() {
+    // Equity Curve Chart
+    const equityCtx = document.getElementById('equityChart')?.getContext('2d');
+    if (equityCtx) {
+        domRefs.equityChart = new Chart(equityCtx, {
+            type: 'line',
+            data: {
+                labels: ['Start'],
+                datasets: [{
+                    label: 'Portfolio Saldo',
+                    data: [1000],
+                    borderColor: '#007bff',
+                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 2,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Saldo (€)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return '€' + value.toLocaleString();
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                }
+            }
+        });
+    }
+
+    // Win/Loss Chart
+    const winLossCtx = document.getElementById('winLossChart')?.getContext('2d');
+    if (winLossCtx) {
+        domRefs.winLossChart = new Chart(winLossCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Winning Trades', 'Losing Trades'],
+                datasets: [{
+                    data: [0, 0],
+                    backgroundColor: ['#28a745', '#dc3545'],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+    }
+
+    // Portfolio Allocation Chart
+    const portfolioCtx = document.getElementById('portfolioChart')?.getContext('2d');
+    if (portfolioCtx) {
+        domRefs.portfolioChart = new Chart(portfolioCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#007bff', '#28a745', '#ffc107', '#dc3545', '#6f42c1',
+                        '#fd7e14', '#20c997', '#e83e8c', '#6c757d', '#17a2b8'
+                    ],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        display: false // We'll show custom legend
+                    }
+                }
+            }
+        });
+    }
+    
+    console.log('✅ Charts initialized');
+}
+
+// ============================================================================
+// DATA LOADING
+// ============================================================================
+
+/**
+ * Load all dashboard data
+ */
+async function loadAllData() {
+    return await utils.withTry(async () => {
+        console.log('📊 Dashboard data laden...');
+        
+        // Update state
+        state.lastSyncAt = new Date().toISOString();
+        state.dataFreshnessMin = 0;
+        
+        // Load data in parallel with error handling for each
+        const promises = [
+            fetchData('/trading-performance').catch(e => { console.error('Trading performance error:', e); return {error: 'Trading performance failed'}; }),
+            fetchData('/portfolio').catch(e => { console.error('Portfolio error:', e); return {error: 'Portfolio failed'}; }),
+            fetchData('/portfolio-details').catch(e => { console.error('Portfolio details error:', e); return {error: 'Portfolio details failed'}; }),
+            fetchData('/equity-curve').catch(e => { console.error('Equity curve error:', e); return {error: 'Equity curve failed'}; }),
+            fetchData('/bot-status').catch(e => { console.error('Bot status error:', e); return {error: 'Bot status failed'}; }),
+            fetchData('/bot-activity').catch(e => { console.error('Bot activity error:', e); return {error: 'Bot activity failed'}; }),
+            fetchData('/ml-insights').catch(e => { console.error('ML insights error:', e); return {error: 'ML insights failed'}; }),
+            fetchData('/market-intelligence').catch(e => { console.error('Market intelligence error:', e); return {error: 'Market intelligence failed'}; }),
+            fetchData('/real-time-alerts').catch(e => { console.error('Real-time alerts error:', e); return {error: 'Real-time alerts failed'}; })
+        ];
+        
+        const [tradingData, portfolioData, portfolioDetails, equityData, statusData, botActivityData, mlInsights, marketIntelligence, realTimeAlerts] = await Promise.all(promises);
+        
+        // Update state
+        state.portfolio = portfolioData;
+        state.positions = portfolioDetails;
+        state.ml = mlInsights;
+        state.risk = marketIntelligence;
+        state.alerts = realTimeAlerts;
+        
+        // Update UI with data (each function handles errors internally)
+        ui.updateTradingPerformance(tradingData);
+        ui.updatePortfolioOverview(portfolioData);
+        ui.updatePortfolioDetails(portfolioDetails);
+        ui.updateEquityCurve(equityData);
+        ui.updateBotStatus(statusData);
+        ui.updateBotActivity(botActivityData);
+        ui.updateMLInsights(mlInsights);
+        ui.updateMarketIntelligence(marketIntelligence);
+        ui.updateRealTimeAlerts(realTimeAlerts);
+        
+        // Update sync banner
+        ui.renderSyncBanner();
+        
+        console.log('✅ Dashboard data loaded');
+    });
+}
+
+/**
+ * Fetch data from API endpoint
+ */
+async function fetchData(endpoint) {
+    try {
+        const response = await fetch(API_BASE + endpoint);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error(`Error fetching ${endpoint}:`, error);
+        throw error;
+    }
+}
+
+// ============================================================================
+// UI RENDERERS (continued)
+// ============================================================================
+
+// Extend ui object with renderer functions
+Object.assign(ui, {
+    updateTradingPerformance(data) {
+        if (data.error) {
+            console.warn('Trading performance data error:', data.error);
+            return;
+        }
+        
+        // Safely update elements that exist
+        utils.safeUpdateElements({
+            'total-pnl': utils.formatCurrency(data.total_pnl),
+            'win-rate': utils.formatPercent(data.win_rate),
+            'total-trades': data.total_trades,
+            'winning-trades': data.winning_trades,
+            'losing-trades': data.losing_trades,
+            'avg-win': utils.formatCurrency(data.avg_win),
+            'avg-loss': utils.formatCurrency(data.avg_loss),
+            'profit-factor': data.profit_factor
+        });
+        
+        // Update win/loss chart
+        if (domRefs.winLossChart) {
+            domRefs.winLossChart.data.datasets[0].data = [data.winning_trades, data.losing_trades];
+            domRefs.winLossChart.update();
+        }
+        
+        // Update P&L color based on value (safely)
+        const pnlElement = document.getElementById('total-pnl');
+        if (pnlElement) {
+            pnlElement.className = data.total_pnl >= 0 ? 'text-success' : 'text-danger';
+        }
+    },
+    
+    updatePortfolioOverview(data) {
+        console.log('Updating portfolio overview with data:', data);
+        
+        if (data.error) {
+            console.warn('Portfolio data error:', data.error);
+            // Show error state instead of "Laden..."
+            utils.safeUpdateElements({
+                'portfolio-value': '⚠️ Geen data',
+                'total-balance': '⚠️ Geen data',
+                'available-balance': '⚠️ Geen data',
+                'daily-pnl': '⚠️ Geen data',
+                'open-positions': '⚠️ Geen data',
+                'open-positions-detail': '⚠️ Geen data',
+                'portfolio-pnl': '⚠️ Geen data'
+            });
+            return;
+        }
+        
+        // Update portfolio elements
+        utils.safeUpdateElements({
+            'portfolio-value': utils.formatCurrency(data.total_balance),
+            'total-balance': utils.formatCurrency(data.total_balance),
+            'available-balance': utils.formatCurrency(data.available_balance),
+            'daily-pnl': utils.formatCurrency(data.daily_pnl || 0),
+            'open-positions': data.open_positions,
+            'open-positions-detail': data.open_positions,
+            'portfolio-pnl': utils.formatCurrency(data.total_pnl),
+            'win-rate': utils.formatPercent(data.win_rate || 0),
+            'sharpe-ratio': (data.sharpe_ratio || 0).toFixed(1),
+            'api-status': 'Connected',
+            'data-freshness': '2 min',
+            'memory-usage': '65%'
+        });
+    },
+    
+    updatePortfolioDetails(data) {
+        if (data.error) {
+            console.warn('Portfolio details error:', data.error);
+            this.updatePortfolioTable([]);
+            this.updatePortfolioChart([]);
+            return;
+        }
+        
+        const holdings = data.holdings || [];
+        this.updatePortfolioTable(holdings);
+        this.updatePortfolioChart(holdings);
+    },
+    
+    updatePortfolioTable(holdings) {
+        if (!domRefs.portfolioTbody) return;
+        
+        if (holdings.length === 0) {
+            domRefs.portfolioTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Geen portfolio bezittingen beschikbaar</td></tr>';
+            return;
+        }
+        
+        domRefs.portfolioTbody.innerHTML = holdings.map(holding => {
+            const pnlClass = holding.pnl >= 0 ? 'text-success' : 'text-danger';
+            const statusClass = holding.status === 'open' ? 'badge bg-success' : 'badge bg-secondary';
+            
+            return `
+                <tr>
+                    <td><strong>${holding.symbol}</strong></td>
+                    <td><span class="badge ${holding.side === 'buy' ? 'bg-success' : 'bg-danger'}">${holding.side}</span></td>
+                    <td>${holding.quantity_filled.toFixed(4)}</td>
+                    <td><span class="${statusClass}">${holding.status}</span></td>
+                    <td class="${pnlClass}">${utils.formatCurrency(holding.pnl)}</td>
+                    <td>${utils.formatCurrency(holding.balance)} <small class="text-muted">(${holding.percentage.toFixed(1)}%)</small></td>
+                </tr>
+            `;
+        }).join('');
+    },
+    
+    updatePortfolioChart(holdings) {
+        if (!domRefs.portfolioChart) return;
+        
+        if (holdings.length === 0) {
+            utils.ensureChartDataOrPlaceholder(domRefs.portfolioChart, ['Geen data'], [1], 'Geen data');
+            this.updatePortfolioLegend([]);
+            return;
+        }
+        
+        // Prepare chart data
+        const labels = holdings.map(h => h.symbol);
+        const data = holdings.map(h => h.balance);
+        const colors = domRefs.portfolioChart.data.datasets[0].backgroundColor.slice(0, holdings.length);
+        
+        // Update chart
+        domRefs.portfolioChart.data.labels = labels;
+        domRefs.portfolioChart.data.datasets[0].data = data;
+        domRefs.portfolioChart.data.datasets[0].backgroundColor = colors;
+        domRefs.portfolioChart.update();
+        
+        // Update custom legend
+        this.updatePortfolioLegend(holdings);
+    },
+    
+    updatePortfolioLegend(holdings) {
+        if (!domRefs.portfolioLegend) return;
+        
+        if (holdings.length === 0) {
+            domRefs.portfolioLegend.innerHTML = '<div class="text-center text-muted">Geen holdings</div>';
+            return;
+        }
+        
+        const colors = domRefs.portfolioChart.data.datasets[0].backgroundColor;
+        
+        domRefs.portfolioLegend.innerHTML = holdings.map((holding, index) => {
+            const color = colors[index] || '#6c757d';
+            return `
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <div class="d-flex align-items-center">
+                        <div class="me-2" style="width: 12px; height: 12px; background-color: ${color}; border-radius: 2px;"></div>
+                        <span class="small">${holding.symbol}</span>
+                    </div>
+                    <div class="text-end">
+                        <div class="small fw-bold">${utils.formatCurrency(holding.balance)}</div>
+                        <div class="small text-muted">${holding.percentage.toFixed(1)}%</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+    
+    updateEquityCurve(data) {
+        if (data.error) {
+            console.warn('Equity curve data error:', data.error);
+            return;
+        }
+        
+        if (domRefs.equityChart && data.labels && data.data) {
+            utils.ensureChartDataOrPlaceholder(domRefs.equityChart, data.labels, data.data, 'Startkapitaal');
+        }
+    },
+    
+    updateBotStatus(data) {
+        if (data.error) {
+            console.warn('Bot status data error:', data.error);
+            return;
+        }
+        
+        // Update bot status (safely)
+        const statusElement = document.getElementById('bot-status');
+        const statusBadge = document.getElementById('pi-status');
+        
+        if (statusElement && statusBadge) {
+            if (data.pi_online) {
+                this.renderStatusBadge(statusElement, 'online');
+                this.renderStatusBadge(statusBadge, 'online');
+            } else {
+                this.renderStatusBadge(statusElement, 'offline');
+                this.renderStatusBadge(statusBadge, 'offline');
+            }
+        }
+        
+        // Update system status (safely)
+        utils.safeUpdateElement('last-sync', this.formatDateTime(data.last_sync));
+        utils.safeUpdateElement('data-files', data.data_files);
+    },
+    
+    updateBotActivity(data) {
+        console.log('Updating bot activity with data:', data);
+        
+        if (data.error) {
+            console.warn('Bot activity data error:', data.error);
+            this.updateBotActivityTable([]);
+            this.updateBotPerformanceMetrics({});
+            return;
+        }
+
+        try {
+            // Update bot activity metrics
+            utils.safeUpdateElements({
+                'bot-uptime': data.uptime || '0h 0m',
+                'decision-frequency': data.decision_frequency || '0/hour',
+                'next-check': data.next_check || '--:--'
+            });
+
+            // Update activity timeline
+            this.updateBotActivityTable(data.activity_timeline || []);
+
+            // Update performance metrics
+            this.updateBotPerformanceMetrics(data.performance_metrics || {});
+
+            // Update performance bars
+            this.updatePerformanceBars(data);
+            
+            // Update decision thresholds
+            this.updateDecisionThresholds(data.decision_thresholds || {});
+            
+            // Update recent decisions
+            this.updateRecentDecisions(data.recent_decisions || []);
+            
+            console.log('Bot activity updated successfully');
+        } catch (error) {
+            console.error('Error updating bot activity:', error);
+        }
+    },
+    
+    updateBotActivityTable(activities) {
+        if (!domRefs.botActivityTbody) return;
+        
+        if (activities.length === 0) {
+            domRefs.botActivityTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Geen bot activiteit geregistreerd</td></tr>';
+            return;
+        }
+        
+        domRefs.botActivityTbody.innerHTML = activities.map(activity => {
+            const statusClass = this.getStatusClass(activity.status);
+            const timeFormatted = this.formatTime(activity.time);
+            
+            return `
+                <tr>
+                    <td><small>${timeFormatted}</small></td>
+                    <td><span class="badge bg-primary">${activity.action}</span></td>
+                    <td>${activity.decision}</td>
+                    <td><small class="text-muted">${activity.reason}</small></td>
+                    <td><span class="badge ${statusClass}">${activity.status}</span></td>
+                </tr>
+            `;
+        }).join('');
+    },
+    
+    updateBotPerformanceMetrics(metrics) {
+        utils.safeUpdateElements({
+            'success-rate': utils.formatPercent(metrics.success_rate || 0),
+            'avg-decision-time': (metrics.avg_decision_time || 0) + 'ms'
+        });
+    },
+    
+    updatePerformanceBars(data) {
+        // Market Analysis
+        const marketAnalysis = data.market_analysis || {score: 0, description: "Marktanalyse", details: "Geen data", status: "Unknown"};
+        const marketScore = typeof marketAnalysis === 'object' ? marketAnalysis.score : marketAnalysis;
+        utils.safeUpdateElement('market-analysis-label', marketAnalysis.description || "Marktanalyse");
+        utils.safeUpdateElement('market-analysis-score', marketScore + '%');
+        const marketBar = document.getElementById('market-analysis-bar');
+        if (marketBar) {
+            marketBar.style.width = marketScore + '%';
+            marketBar.className = `progress-bar ${this.getProgressBarClass(marketScore)}`;
+        }
+        utils.safeUpdateElement('market-analysis-details', marketAnalysis.details || "Geen data");
+        
+        // Risk Assessment
+        const riskAssessment = data.risk_assessment || {score: 0, description: "Risico Beoordeling", details: "Geen data", status: "Unknown"};
+        const riskScore = typeof riskAssessment === 'object' ? riskAssessment.score : riskAssessment;
+        utils.safeUpdateElement('risk-assessment-label', riskAssessment.description || "Risico Beoordeling");
+        utils.safeUpdateElement('risk-assessment-score', riskScore + '%');
+        const riskBar = document.getElementById('risk-assessment-bar');
+        if (riskBar) {
+            riskBar.style.width = riskScore + '%';
+            riskBar.className = `progress-bar ${this.getRiskBarClass(riskScore)}`;
+        }
+        utils.safeUpdateElement('risk-assessment-details', riskAssessment.details || "Geen data");
+        
+        // Execution Speed
+        const executionSpeed = data.execution_speed || {score: 0, description: "Data Sync Snelheid", details: "Geen data", status: "Unknown"};
+        const speedScore = typeof executionSpeed === 'object' ? executionSpeed.score : executionSpeed;
+        utils.safeUpdateElement('execution-speed-label', executionSpeed.description || "Data Sync Snelheid");
+        utils.safeUpdateElement('execution-speed-score', speedScore + '%');
+        const speedBar = document.getElementById('execution-speed-bar');
+        if (speedBar) {
+            speedBar.style.width = speedScore + '%';
+            speedBar.className = `progress-bar ${this.getSpeedBarClass(speedScore)}`;
+        }
+        utils.safeUpdateElement('execution-speed-details', executionSpeed.details || "Geen data");
+    },
+    
+    updateDecisionThresholds(thresholds) {
+        console.log('Updating decision thresholds:', thresholds);
+        
+        if (!thresholds || Object.keys(thresholds).length === 0) {
+            console.log('No thresholds data available');
+            return;
+        }
+        
+        try {
+            utils.safeUpdateElements({
+                'price-threshold': thresholds.price_change_threshold || '2.5%',
+                'volume-threshold': thresholds.volume_threshold || '1000',
+                'rsi-oversold': thresholds.rsi_oversold || '30',
+                'rsi-overbought': thresholds.rsi_overbought || '70',
+                'stop-loss': thresholds.stop_loss || '3%',
+                'take-profit': thresholds.take_profit || '5%',
+                'max-position': thresholds.max_position_size || '10%',
+                'risk-per-trade': thresholds.risk_per_trade || '2%'
+            });
+            
+            console.log('Decision thresholds updated successfully');
+        } catch (error) {
+            console.error('Error updating decision thresholds:', error);
+        }
+    },
+    
+    updateRecentDecisions(decisions) {
+        console.log('Updating recent decisions:', decisions);
+        
+        if (!domRefs.recentDecisionsTbody) {
+            console.error('Recent decisions tbody element not found');
+            return;
+        }
+        
+        if (decisions.length === 0) {
+            domRefs.recentDecisionsTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Geen recente besluiten</td></tr>';
+            return;
+        }
+        
+        try {
+            domRefs.recentDecisionsTbody.innerHTML = decisions.map(decision => {
+                const statusClass = this.getStatusClass(decision.status);
+                
+                return `
+                    <tr>
+                        <td><small>${decision.timestamp}</small></td>
+                        <td><span class="badge bg-primary">${decision.action}</span></td>
+                        <td>${decision.decision}</td>
+                        <td><span class="badge ${statusClass}">${decision.status}</span></td>
+                    </tr>
+                `;
+            }).join('');
+            
+            console.log('Recent decisions updated successfully');
+        } catch (error) {
+            console.error('Error updating recent decisions:', error);
+        }
+    },
+    
+    updateMLInsights(data) {
+        console.log('Updating ML insights:', data);
+        
+        if (data.error) {
+            console.warn('ML insights data error:', data.error);
+            return;
+        }
+        
+        try {
+            const modelPerf = data.model_performance || {};
+            const signalQuality = data.signal_quality || {};
+            
+            // Update model performance
+            utils.safeUpdateElements({
+                'predictions-today': modelPerf.predictions_today || '0',
+                'model-accuracy': utils.formatPercent(modelPerf.model_accuracy || 0),
+                'ml-confidence': utils.formatPercent(modelPerf.avg_confidence || 0),
+                'signal-strength': signalQuality.signal_strength || '0',
+                'regime-status': signalQuality.regime_status || 'Unknown',
+                'market-volatility': signalQuality.market_volatility || 'Unknown',
+                'trend-direction': signalQuality.trend_direction || 'Unknown'
+            });
+            
+            // Update feature importance
+            if (modelPerf.feature_importance) {
+                const container = document.getElementById('feature-importance');
+                if (container) {
+                    container.innerHTML = modelPerf.feature_importance.map(feature => `
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>${feature.feature}</span>
+                            <span>${(feature.importance * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="progress mb-2" style="height: 6px;">
+                            <div class="progress-bar" style="width: ${feature.importance * 100}%"></div>
+                        </div>
+                    `).join('');
+                }
+            }
+            
+            console.log('ML insights updated successfully');
+        } catch (error) {
+            console.error('Error updating ML insights:', error);
+        }
+    },
+    
+    updateMarketIntelligence(data) {
+        console.log('Updating market intelligence:', data);
+        
+        if (data.error) {
+            console.warn('Market intelligence data error:', data.error);
+            return;
+        }
+        
+        try {
+            const marketOverview = data.market_overview || {};
+            const riskManagement = data.risk_management || {};
+            
+            // Update market overview
+            utils.safeUpdateElements({
+                'volatility-index': marketOverview.volatility_index || '0',
+                'volume-analysis': marketOverview.volume_analysis || 'Unknown',
+                'risk-rejects': riskManagement.risk_rejects || '0',
+                'daily-loss': utils.formatCurrency(riskManagement.daily_loss || 0)
+            });
+            
+            const positionSizes = riskManagement.position_sizes || {};
+            utils.safeUpdateElements({
+                'max-position': positionSizes.max_position || '0%',
+                'avg-position': positionSizes.avg_position || '0%',
+                'total-exposure': positionSizes.total_exposure || '0%'
+            });
+            
+            const correlationMatrix = riskManagement.correlation_matrix || {};
+            utils.safeUpdateElements({
+                'btc-eth-correlation': (correlationMatrix.btc_eth || 0).toFixed(2),
+                'btc-ada-correlation': (correlationMatrix.btc_ada || 0).toFixed(2),
+                'eth-ada-correlation': (correlationMatrix.eth_ada || 0).toFixed(2)
+            });
+            
+            // Update top movers
+            if (marketOverview.top_movers) {
+                const container = document.getElementById('top-movers');
+                if (container) {
+                    container.innerHTML = marketOverview.top_movers.map(mover => `
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span><strong>${mover.symbol}</strong></span>
+                            <span class="${mover.change.startsWith('+') ? 'text-success' : 'text-danger'}">${mover.change}</span>
+                            <small class="text-muted">${mover.volume}</small>
+                        </div>
+                    `).join('');
+                }
+            }
+            
+            console.log('Market intelligence updated successfully');
+        } catch (error) {
+            console.error('Error updating market intelligence:', error);
+        }
+    },
+    
+    updateRealTimeAlerts(data) {
+        console.log('Updating real-time alerts:', data);
+        
+        if (data.error) {
+            console.warn('Real-time alerts data error:', data.error);
+            return;
+        }
+        
+        try {
+            // Update alert count
+            utils.safeUpdateElement('total-alerts', data.total_alerts || '0');
+            
+            // Update critical alerts
+            if (data.critical_alerts && domRefs.criticalAlerts) {
+                domRefs.criticalAlerts.innerHTML = data.critical_alerts.map(alert => `
+                    <div class="alert alert-${this.getAlertClass(alert.severity)}">
+                        <div class="d-flex justify-content-between">
+                            <span><i class="fas fa-${this.getAlertIcon(alert.type)}"></i> ${alert.message}</span>
+                            <small class="text-muted">${alert.timestamp}</small>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            // Update trading opportunities
+            if (data.trading_opportunities && domRefs.tradingOpportunities) {
+                domRefs.tradingOpportunities.innerHTML = data.trading_opportunities.map(opportunity => `
+                    <div class="alert alert-warning">
+                        <div class="d-flex justify-content-between">
+                            <span><i class="fas fa-signal"></i> ${opportunity.message}</span>
+                            <small class="text-muted">${opportunity.timestamp}</small>
+                        </div>
+                        <small class="text-muted">Confidence: ${opportunity.confidence}% - Status: ${opportunity.status}</small>
+                    </div>
+                `).join('');
+            }
+            
+            console.log('Real-time alerts updated successfully');
+        } catch (error) {
+            console.error('Error updating real-time alerts:', error);
+        }
+    },
+    
+    // Helper functions
+    getStatusClass(status) {
+        switch (status.toLowerCase()) {
+            case 'success':
+            case 'completed':
+            case 'active':
+            case 'online':
+            case 'veilig':
+            case 'succesvol':
+                return 'bg-success';
+            case 'warning':
+            case 'pending':
+            case 'monitoring':
+            case 'geen actie':
+                return 'bg-warning';
+            case 'error':
+            case 'failed':
+            case 'offline':
+                return 'bg-danger';
+            case 'info':
+            case 'neutral':
+                return 'bg-info';
+            default:
+                return 'bg-secondary';
+        }
+    },
+    
+    getProgressBarClass(score) {
+        if (score >= 80) return 'bg-success';
+        if (score >= 60) return 'bg-info';
+        if (score >= 40) return 'bg-warning';
+        return 'bg-danger';
+    },
+    
+    getRiskBarClass(score) {
+        if (score <= 30) return 'bg-success';  // Low risk
+        if (score <= 60) return 'bg-warning';  // Medium risk
+        return 'bg-danger';  // High risk
+    },
+    
+    getSpeedBarClass(percentage) {
+        if (percentage >= 80) return 'bg-success';  // Fast
+        if (percentage >= 60) return 'bg-info';     // Medium
+        if (percentage >= 40) return 'bg-warning';  // Slow
+        return 'bg-danger';  // Very slow
+    },
+    
+    getAlertClass(severity) {
+        switch (severity) {
+            case 'high': return 'danger';
+            case 'medium': return 'warning';
+            case 'low': return 'info';
+            default: return 'info';
+        }
+    },
+    
+    getAlertIcon(type) {
+        switch (type) {
+            case 'Error': return 'exclamation-triangle';
+            case 'Warning': return 'exclamation-circle';
+            case 'Info': return 'info-circle';
+            default: return 'info-circle';
+        }
+    },
+    
+    formatTime(timeString) {
+        if (!timeString) return '--:--';
+        
+        // If the timeString is already formatted (contains -), return as is
+        if (timeString.includes('-') && timeString.includes(':')) {
+            return timeString;
+        }
+        
+        try {
+            const date = new Date(timeString);
+            if (isNaN(date.getTime())) {
+                return timeString; // Return original if can't parse
+            }
+            return date.toLocaleTimeString('en-US', { 
+                hour12: false, 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+        } catch (error) {
+            return timeString;
+        }
+    },
+    
+    formatDateTime(dateString) {
+        if (!dateString) return 'Never';
+        
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        } catch (error) {
+            return 'Invalid Date';
+        }
+    }
+});
+
+// ============================================================================
+// AUTO-REFRESH & SYNC
+// ============================================================================
+
+/**
+ * Start auto-refresh timer
+ */
+function startAutoRefresh() {
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+    }
+    
+    autoRefreshInterval = setInterval(() => {
+        console.log('🔄 Auto-refreshing dashboard data...');
+        loadAllData();
+    }, REFRESH_INTERVAL);
+    
+    console.log(`⏰ Auto-refresh started (${REFRESH_INTERVAL / 1000}s interval)`);
+}
+
+/**
+ * Manual sync trigger
+ */
+async function syncNow() {
+    if (isSyncing) {
+        console.log('⏳ Sync already in progress...');
+        return;
+    }
+    
+    isSyncing = true;
+    const syncButton = document.querySelector('button[onclick="syncNow()"]');
+    const icon = syncButton?.querySelector('i');
+    
+    try {
+        // Show syncing state
+        if (icon) {
+            icon.className = 'fas fa-sync-alt syncing';
+        }
+        if (syncButton) {
+            syncButton.disabled = true;
+        }
+        
+        console.log('🔄 Triggering manual sync...');
+        
+        // Trigger sync
+        const response = await fetch(API_BASE + '/sync-now', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log('✅ Manual sync completed');
+            showSuccess('Synchronisatie succesvol voltooid');
+            
+            // Reload data after sync
+            setTimeout(() => {
+                loadAllData();
+            }, 1000);
+        } else {
+            console.error('❌ Manual sync failed:', result.message);
+            showError('Synchronisatie mislukt: ' + result.message);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error during manual sync:', error);
+        showError('Synchronisatie fout: ' + error);
+    } finally {
+        // Reset button state
+        if (icon) {
+            icon.className = 'fas fa-sync-alt';
+        }
+        if (syncButton) {
+            syncButton.disabled = false;
+        }
+        isSyncing = false;
+    }
+}
+
+// ============================================================================
+// ALERT FUNCTIONS
+// ============================================================================
+
+/**
+ * Show success message
+ */
+function showSuccess(message) {
+    showAlert(message, 'success');
+}
+
+/**
+ * Show error message
+ */
+function showError(message) {
+    showAlert(message, 'danger');
+}
+
+/**
+ * Show alert message
+ */
+function showAlert(message, type) {
+    // Create alert element
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    // Add to page
+    document.body.appendChild(alertDiv);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.remove();
+        }
+    }, 5000);
+}
+
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
+/**
+ * Handle page visibility change
+ */
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        console.log('📱 Page hidden - pausing auto-refresh');
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+        }
+    } else {
+        console.log('📱 Page visible - resuming auto-refresh');
+        startAutoRefresh();
+        loadAllData(); // Load fresh data when page becomes visible
+    }
+});
+
+/**
+ * Handle window resize
+ */
+window.addEventListener('resize', function() {
+    // Resize charts when window resizes
+    if (domRefs.equityChart) {
+        domRefs.equityChart.resize();
+    }
+    if (domRefs.winLossChart) {
+        domRefs.winLossChart.resize();
+    }
+    if (domRefs.portfolioChart) {
+        domRefs.portfolioChart.resize();
+    }
+});
+
+// ============================================================================
+// EXPORT FUNCTIONS FOR GLOBAL ACCESS
+// ============================================================================
+window.syncNow = syncNow;
+
+// ============================================================================
+// END OF MODULAR DASHBOARD.JS
+// ============================================================================

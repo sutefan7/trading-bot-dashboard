@@ -1,116 +1,266 @@
 /**
  * Trading Bot Dashboard - JavaScript
- * Handles real-time data updates and chart rendering
+ * Modular structure: domRefs, utils, state, ui
  */
 
-// Global variables
-let equityChart = null;
-let winLossChart = null;
-let portfolioChart = null;
+// ============================================================================
+// 1) DOM REFERENCES (domRefs)
+// ============================================================================
+const domRefs = {
+    // Charts
+    equityChart: null,
+    winLossChart: null,
+    portfolioChart: null,
+    
+    // Global elements
+    globalAlert: null,
+    syncBanner: null,
+    
+    // Portfolio elements
+    portfolioValue: null,
+    totalBalance: null,
+    availableBalance: null,
+    dailyPnl: null,
+    openPositions: null,
+    portfolioTbody: null,
+    portfolioLegend: null,
+    
+    // Bot activity elements
+    botUptime: null,
+    decisionFrequency: null,
+    nextCheck: null,
+    botActivityTbody: null,
+    
+    // Performance elements
+    marketAnalysisBar: null,
+    riskAssessmentBar: null,
+    executionSpeedBar: null,
+    
+    // System elements
+    lastUpdateTime: null,
+    totalAlerts: null,
+    criticalAlerts: null,
+    tradingOpportunities: null
+};
+
+// ============================================================================
+// 2) UTILITIES (utils)
+// ============================================================================
+const utils = {
+    // Formatters
+    fmt: new Intl.NumberFormat('nl-NL'),
+    fmtCurrency: new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }),
+    
+    formatCurrency(v) { 
+        return this.isFinite(v) ? this.fmtCurrency.format(v) : '—'; 
+    },
+    
+    formatPercent(v, digits = 1) { 
+        return this.isFinite(v) ? `${v.toFixed(digits)}%` : '—'; 
+    },
+    
+    safeNumber(v, def = 0) { 
+        const n = Number(v); 
+        return Number.isFinite(n) ? n : def; 
+    },
+    
+    isFinite(v) {
+        return typeof v === 'number' && Number.isFinite(v);
+    },
+    
+    // DOM helpers
+    safeUpdateElement(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        } else {
+            console.warn(`Element with id '${id}' not found`);
+        }
+    },
+    
+    safeUpdateElements(elements) {
+        Object.entries(elements).forEach(([id, value]) => {
+            if (id && id.trim() !== '') {
+                this.safeUpdateElement(id, value);
+            }
+        });
+    },
+    
+    renderEmptyState(container, message = 'Geen data beschikbaar') {
+        if (container) {
+            container.innerHTML = `
+                <div class="p-3 text-center text-muted border rounded-3">
+                    ${message}
+                </div>`;
+        }
+    },
+    
+    ensureChartDataOrPlaceholder(chart, labels, data, placeholderLabel = 'Geen data') {
+        if (!chart) return;
+        
+        if (!data?.length || data.every(v => v === 0 || v == null)) {
+            chart.data.labels = [placeholderLabel];
+            chart.data.datasets[0].data = [1];
+            chart.data.datasets[0].backgroundColor = ['#adb5bd'];
+        } else {
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = data;
+        }
+        chart.update();
+    },
+    
+    // Error handling
+    async withTry(asyncFn, onError) {
+        try { 
+            return await asyncFn(); 
+        } catch (e) {
+            console.error(e);
+            onError?.(e);
+            if (domRefs.globalAlert) {
+                domRefs.globalAlert.innerHTML = `
+                    <div class="alert alert-warning d-flex align-items-center" role="alert">
+                        <i class="fa-solid fa-triangle-exclamation me-2"></i>
+                        <div>Kon data niet ophalen. Probeer later opnieuw.</div>
+                    </div>`;
+            }
+            return null;
+        }
+    }
+};
+
+// ============================================================================
+// 3) STATE MANAGEMENT (state)
+// ============================================================================
+const state = {
+    lastSyncAt: null, // ISO string
+    dataFreshnessMin: 0, // integer, minuten
+    system: {
+        apiConnected: false,
+        piConnected: false,
+        autoRefresh: true
+    },
+    portfolio: {},
+    positions: {},
+    ml: {},
+    risk: {},
+    alerts: []
+};
+
+// ============================================================================
+// 4) UI RENDERERS (ui)
+// ============================================================================
+const ui = {
+    renderSyncBanner() {
+        if (!domRefs.syncBanner) return;
+        
+        const last = state.lastSyncAt ? new Date(state.lastSyncAt) : null;
+        const mins = state.dataFreshnessMin;
+        
+        if (last) {
+            domRefs.syncBanner.innerHTML = `
+                Laatste update: ${last.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                <span class="text-muted ms-2">(${mins} min geleden)</span>
+            `;
+        } else {
+            domRefs.syncBanner.innerHTML = 'Nooit gesynchroniseerd';
+        }
+    },
+    
+    renderStatusBadge(element, status) {
+        if (!element) return;
+        
+        const statusMap = {
+            'online': { text: 'Online', class: 'badge bg-success' },
+            'offline': { text: 'Offline', class: 'badge bg-danger' },
+            'warning': { text: 'Warning', class: 'badge bg-warning' },
+            'error': { text: 'Error', class: 'badge bg-danger' }
+        };
+        
+        const statusInfo = statusMap[status] || statusMap['offline'];
+        element.textContent = statusInfo.text;
+        element.className = statusInfo.class;
+    }
+};
+
+// ============================================================================
+// GLOBAL VARIABLES & CONFIGURATION
+// ============================================================================
 let autoRefreshInterval = null;
 let isSyncing = false;
-
-// Configuration
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const API_BASE = '/api';
 
-// Initialize dashboard when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 Initializing Trading Bot Dashboard...');
-    console.log('✅ JavaScript file loaded successfully');
-    
-    // Initialize dashboard functionality
-    console.log('✅ Dashboard JavaScript loaded successfully');
-    
-    // Initialize charts
-    initializeCharts();
-    
-    // Initialize Bootstrap tooltips
-    initializeTooltips();
-    
-    // Test collapse functionality
-    testCollapseFunctionality();
-    
-    // Load initial data
-    loadAllData();
-    
-    // Start auto-refresh
-    startAutoRefresh();
-    
-    console.log('✅ Dashboard initialized');
-});
+// ============================================================================
+// GLOBAL INITIALIZATION
+// ============================================================================
 
 /**
- * Initialize Bootstrap tooltips
+ * Initialize DOM references
  */
-function initializeTooltips() {
-    console.log('Initializing Bootstrap tooltips...');
-    try {
-        // Initialize all tooltips
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-        console.log('Found tooltip elements:', tooltipTriggerList.length);
-        
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl);
-        });
-        
-        console.log('Initialized tooltips:', tooltipList.length);
-    } catch (error) {
-        console.error('Error initializing tooltips:', error);
-    }
+function initializeDOMReferences() {
+    // Global elements
+    domRefs.globalAlert = document.getElementById('global-alert');
+    domRefs.syncBanner = document.getElementById('sync-banner');
+    
+    // Portfolio elements
+    domRefs.portfolioValue = document.getElementById('portfolio-value');
+    domRefs.totalBalance = document.getElementById('total-balance');
+    domRefs.availableBalance = document.getElementById('available-balance');
+    domRefs.dailyPnl = document.getElementById('daily-pnl');
+    domRefs.openPositions = document.getElementById('open-positions');
+    domRefs.portfolioTbody = document.getElementById('portfolio-tbody');
+    domRefs.portfolioLegend = document.getElementById('portfolio-legend');
+    
+    // Bot activity elements
+    domRefs.botUptime = document.getElementById('bot-uptime');
+    domRefs.decisionFrequency = document.getElementById('decision-frequency');
+    domRefs.nextCheck = document.getElementById('next-check');
+    domRefs.botActivityTbody = document.getElementById('bot-activity-tbody');
+    
+    // Performance elements
+    domRefs.marketAnalysisBar = document.getElementById('market-analysis-bar');
+    domRefs.riskAssessmentBar = document.getElementById('risk-assessment-bar');
+    domRefs.executionSpeedBar = document.getElementById('execution-speed-bar');
+    
+    // System elements
+    domRefs.lastUpdateTime = document.getElementById('last-update-time');
+    domRefs.totalAlerts = document.getElementById('total-alerts');
+    domRefs.criticalAlerts = document.getElementById('critical-alerts');
+    domRefs.tradingOpportunities = document.getElementById('trading-opportunities');
+    
+    console.log('✅ DOM references initialized');
 }
 
 /**
- * Test collapse functionality
+ * Initialize Bootstrap components
  */
-function testCollapseFunctionality() {
-    console.log('Testing collapse functionality...');
-    try {
-        const collapseElements = document.querySelectorAll('[data-bs-toggle="collapse"]');
-        console.log('Found collapse elements:', collapseElements.length);
-        
-        collapseElements.forEach((element, index) => {
-            console.log(`Collapse element ${index}:`, element.getAttribute('data-bs-target'));
-            
-            // Add manual click handler as fallback
-            element.addEventListener('click', function(e) {
-                e.preventDefault();
-                const targetId = this.getAttribute('data-bs-target');
-                const targetElement = document.querySelector(targetId);
-                
-                if (targetElement) {
-                    if (targetElement.classList.contains('show')) {
-                        targetElement.classList.remove('show');
-                        this.querySelector('i').classList.remove('fa-chevron-up');
-                        this.querySelector('i').classList.add('fa-chevron-down');
-                        console.log('Collapsed:', targetId);
-                    } else {
-                        targetElement.classList.add('show');
-                        this.querySelector('i').classList.remove('fa-chevron-down');
-                        this.querySelector('i').classList.add('fa-chevron-up');
-                        console.log('Expanded:', targetId);
-                    }
-                }
-            });
-        });
-    } catch (error) {
-        console.error('Error testing collapse functionality:', error);
-    }
+function initializeBootstrapComponents() {
+    // Bootstrap tooltips (fallback for existing elements)
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        new bootstrap.Tooltip(el);
+    });
+    
+    console.log('✅ Bootstrap components initialized');
 }
+
+// ============================================================================
+// CHART INITIALIZATION
+// ============================================================================
 
 /**
  * Initialize Chart.js charts
  */
 function initializeCharts() {
     // Equity Curve Chart
-    const equityCtx = document.getElementById('equityChart').getContext('2d');
-    equityChart = new Chart(equityCtx, {
+    const equityCtx = document.getElementById('equityChart')?.getContext('2d');
+    if (equityCtx) {
+        domRefs.equityChart = new Chart(equityCtx, {
         type: 'line',
         data: {
-            labels: ['Start'],
+                labels: ['Start'],
             datasets: [{
-                label: 'Portfolio Saldo',
-                data: [1000],
+                    label: 'Portfolio Saldo',
+                    data: [1000],
                 borderColor: '#007bff',
                 backgroundColor: 'rgba(0, 123, 255, 0.1)',
                 borderWidth: 2,
@@ -140,11 +290,11 @@ function initializeCharts() {
                     display: true,
                     title: {
                         display: true,
-                        text: 'Saldo (€)'
+                            text: 'Saldo (€)'
                     },
                     ticks: {
                         callback: function(value) {
-                            return '€' + value.toLocaleString();
+                                return '€' + value.toLocaleString();
                         }
                     }
                 }
@@ -155,10 +305,12 @@ function initializeCharts() {
             }
         }
     });
+    }
 
     // Win/Loss Chart
-    const winLossCtx = document.getElementById('winLossChart').getContext('2d');
-    winLossChart = new Chart(winLossCtx, {
+    const winLossCtx = document.getElementById('winLossChart')?.getContext('2d');
+    if (winLossCtx) {
+        domRefs.winLossChart = new Chart(winLossCtx, {
         type: 'doughnut',
         data: {
             labels: ['Winning Trades', 'Losing Trades'],
@@ -179,42 +331,55 @@ function initializeCharts() {
             }
         }
     });
+}
 
     // Portfolio Allocation Chart
-    const portfolioCtx = document.getElementById('portfolioChart').getContext('2d');
-    portfolioChart = new Chart(portfolioCtx, {
-        type: 'doughnut',
-        data: {
-            labels: [],
-            datasets: [{
-                data: [],
-                backgroundColor: [
-                    '#007bff', '#28a745', '#ffc107', '#dc3545', '#6f42c1',
-                    '#fd7e14', '#20c997', '#e83e8c', '#6c757d', '#17a2b8'
-                ],
-                borderWidth: 2,
-                borderColor: '#fff'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    display: false // We'll show custom legend
+    const portfolioCtx = document.getElementById('portfolioChart')?.getContext('2d');
+    if (portfolioCtx) {
+        domRefs.portfolioChart = new Chart(portfolioCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#007bff', '#28a745', '#ffc107', '#dc3545', '#6f42c1',
+                        '#fd7e14', '#20c997', '#e83e8c', '#6c757d', '#17a2b8'
+                    ],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        display: false // We'll show custom legend
+                    }
                 }
             }
-        }
-    });
+        });
+    }
+    
+    console.log('✅ Charts initialized');
 }
+
+// ============================================================================
+// DATA LOADING
+// ============================================================================
 
 /**
  * Load all dashboard data
  */
 async function loadAllData() {
-    try {
+    return await utils.withTry(async () => {
         console.log('📊 Dashboard data laden...');
+        
+        // Update state
+        state.lastSyncAt = new Date().toISOString();
+        state.dataFreshnessMin = 0;
         
         // Load data in parallel with error handling for each
         const promises = [
@@ -231,26 +396,29 @@ async function loadAllData() {
         
         const [tradingData, portfolioData, portfolioDetails, equityData, statusData, botActivityData, mlInsights, marketIntelligence, realTimeAlerts] = await Promise.all(promises);
         
-        // Update UI with data (each function handles errors internally)
-        updateTradingPerformance(tradingData);
-        updatePortfolioOverview(portfolioData);
-        updatePortfolioDetails(portfolioDetails);
-        updateEquityCurve(equityData);
-        updateBotStatus(statusData);
-        updateBotActivity(botActivityData);
-        updateMLInsights(mlInsights);
-        updateMarketIntelligence(marketIntelligence);
-        updateRealTimeAlerts(realTimeAlerts);
+        // Update state
+        state.portfolio = portfolioData;
+        state.positions = portfolioDetails;
+        state.ml = mlInsights;
+        state.risk = marketIntelligence;
+        state.alerts = realTimeAlerts;
         
-        // Update last update time
-        updateLastUpdateTime();
+        // Update UI with data (each function handles errors internally)
+        ui.updateTradingPerformance(tradingData);
+        ui.updatePortfolioOverview(portfolioData);
+        ui.updatePortfolioDetails(portfolioDetails);
+        ui.updateEquityCurve(equityData);
+        ui.updateBotStatus(statusData);
+        ui.updateBotActivity(botActivityData);
+        ui.updateMLInsights(mlInsights);
+        ui.updateMarketIntelligence(marketIntelligence);
+        ui.updateRealTimeAlerts(realTimeAlerts);
+        
+        // Update sync banner
+        ui.renderSyncBanner();
         
         console.log('✅ Dashboard data loaded');
-        
-    } catch (error) {
-        console.error('❌ Error loading dashboard data:', error);
-        showError('Dashboard data laden mislukt: ' + error.message);
-    }
+    });
 }
 
 /**
@@ -269,488 +437,595 @@ async function fetchData(endpoint) {
     }
 }
 
-/**
- * Safely update element text content
- */
-function safeUpdateElement(id, value) {
-    const element = document.getElementById(id);
-    if (element) {
-        element.textContent = value;
-    } else {
-        console.warn(`Element with id '${id}' not found`);
-    }
-}
+// ============================================================================
+// UI RENDERERS (continued)
+// ============================================================================
 
-/**
- * Safely update multiple elements
- */
-function safeUpdateElements(elements) {
-    Object.entries(elements).forEach(([id, value]) => {
-        if (id && id.trim() !== '') {
-            safeUpdateElement(id, value);
-        } else {
-            console.warn('Empty or invalid element ID:', id);
-        }
-    });
-}
-
-/**
- * Update trading performance section
- */
-function updateTradingPerformance(data) {
+// Extend ui object with renderer functions
+Object.assign(ui, {
+    updateTradingPerformance(data) {
     if (data.error) {
         console.warn('Trading performance data error:', data.error);
         return;
     }
     
-    // Safely update elements that exist
-    safeUpdateElements({
-        'total-pnl': formatCurrency(data.total_pnl),
-        'win-rate': data.win_rate + '%',
-        'total-trades': data.total_trades,
-        'winning-trades': data.winning_trades,
-        'losing-trades': data.losing_trades,
-        'avg-win': formatCurrency(data.avg_win),
-        'avg-loss': formatCurrency(data.avg_loss),
-        'profit-factor': data.profit_factor
-    });
+        // Safely update elements that exist
+        utils.safeUpdateElements({
+            'total-pnl': utils.formatCurrency(data.total_pnl),
+            'win-rate': utils.formatPercent(data.win_rate),
+            'total-trades': data.total_trades,
+            'winning-trades': data.winning_trades,
+            'losing-trades': data.losing_trades,
+            'avg-win': utils.formatCurrency(data.avg_win),
+            'avg-loss': utils.formatCurrency(data.avg_loss),
+            'profit-factor': data.profit_factor
+        });
     
     // Update win/loss chart
-    if (winLossChart) {
-        winLossChart.data.datasets[0].data = [data.winning_trades, data.losing_trades];
-        winLossChart.update();
-    }
-    
-    // Update P&L color based on value (safely)
+        if (domRefs.winLossChart) {
+            domRefs.winLossChart.data.datasets[0].data = [data.winning_trades, data.losing_trades];
+            domRefs.winLossChart.update();
+        }
+        
+        // Update P&L color based on value (safely)
     const pnlElement = document.getElementById('total-pnl');
-    if (pnlElement) {
+        if (pnlElement) {
     pnlElement.className = data.total_pnl >= 0 ? 'text-success' : 'text-danger';
-    }
 }
-
-/**
- * Update portfolio overview section
- */
-function updatePortfolioOverview(data) {
-    console.log('Updating portfolio overview with data:', data);
+    },
     
+    updatePortfolioOverview(data) {
+        console.log('Updating portfolio overview with data:', data);
+        
     if (data.error) {
         console.warn('Portfolio data error:', data.error);
-        // Show error state instead of "Laden..."
-        safeUpdateElements({
-            'portfolio-value': '⚠️ Geen data',
-            'total-balance': '⚠️ Geen data',
-            'available-balance': '⚠️ Geen data',
-            'daily-pnl': '⚠️ Geen data',
-            'open-positions': '⚠️ Geen data',
-            'open-positions-detail': '⚠️ Geen data',
-            'portfolio-pnl': '⚠️ Geen data'
-        });
+            // Show error state instead of "Laden..."
+            utils.safeUpdateElements({
+                'portfolio-value': '⚠️ Geen data',
+                'total-balance': '⚠️ Geen data',
+                'available-balance': '⚠️ Geen data',
+                'daily-pnl': '⚠️ Geen data',
+                'open-positions': '⚠️ Geen data',
+                'open-positions-detail': '⚠️ Geen data',
+                'portfolio-pnl': '⚠️ Geen data'
+            });
         return;
     }
     
-    // Direct update for debugging
-    const portfolioValue = document.getElementById('portfolio-value');
-    if (portfolioValue) {
-        portfolioValue.textContent = formatCurrency(data.total_balance);
-        console.log('Updated portfolio-value to:', formatCurrency(data.total_balance));
-    } else {
-        console.error('Element portfolio-value not found');
-    }
-    
-    const openPositions = document.getElementById('open-positions');
-    if (openPositions) {
-        openPositions.textContent = data.open_positions;
-        console.log('Updated open-positions to:', data.open_positions);
-    } else {
-        console.error('Element open-positions not found');
-    }
-    
-    const openPositionsDetail = document.getElementById('open-positions-detail');
-    if (openPositionsDetail) {
-        openPositionsDetail.textContent = data.open_positions;
-        console.log('Updated open-positions-detail to:', data.open_positions);
-    } else {
-        console.error('Element open-positions-detail not found');
-    }
-    
-    // Force update all open-positions elements
-    const allOpenPositions = document.querySelectorAll('[id*="open-positions"]');
-    console.log('Found open-positions elements:', allOpenPositions.length);
-    allOpenPositions.forEach((el, index) => {
-        el.textContent = data.open_positions;
-        console.log(`Updated open-positions element ${index} to:`, data.open_positions);
-    });
-    
-    // Safely update other portfolio elements
-    safeUpdateElements({
-        'total-balance': formatCurrency(data.total_balance),
-        'available-balance': formatCurrency(data.available_balance),
-        'daily-pnl': formatCurrency(data.daily_pnl || 0),
-        'portfolio-pnl': formatCurrency(data.total_pnl),
-        'win-rate': (data.win_rate || 0) + '%',
-        'sharpe-ratio': (data.sharpe_ratio || 0).toFixed(1),
-        'api-status': 'Connected',
-        'data-freshness': '2 min',
-        'memory-usage': '65%'
-    });
-}
-
-/**
- * Update portfolio details section
- */
-function updatePortfolioDetails(data) {
-    if (data.error) {
-        console.warn('Portfolio details error:', data.error);
-        updatePortfolioTable([]);
-        updatePortfolioChart([]);
-        return;
-    }
-    
-    const holdings = data.holdings || [];
-    updatePortfolioTable(holdings);
-    updatePortfolioChart(holdings);
-}
-
-/**
- * Update portfolio holdings table
- */
-function updatePortfolioTable(holdings) {
-    const tbody = document.getElementById('portfolio-tbody');
-    
-    if (holdings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Geen portfolio bezittingen beschikbaar</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = holdings.map(holding => {
-        const pnlClass = holding.pnl >= 0 ? 'text-success' : 'text-danger';
-        const statusClass = holding.status === 'open' ? 'badge bg-success' : 'badge bg-secondary';
+        // Update KPIs with color logic
+        this.updateKPIs(data);
         
-        return `
-            <tr>
-                <td><strong>${holding.symbol}</strong></td>
-                <td><span class="badge ${holding.side === 'buy' ? 'bg-success' : 'bg-danger'}">${holding.side}</span></td>
-                <td>${holding.quantity_filled.toFixed(4)}</td>
-                <td><span class="${statusClass}">${holding.status}</span></td>
-                <td class="${pnlClass}">${formatCurrency(holding.pnl)}</td>
-                <td>${formatCurrency(holding.balance)} <small class="text-muted">(${holding.percentage.toFixed(1)}%)</small></td>
-            </tr>
-        `;
-    }).join('');
-}
-
-/**
- * Update portfolio allocation chart
- */
-function updatePortfolioChart(holdings) {
-    if (!portfolioChart) return;
+        // Update other portfolio elements
+        utils.safeUpdateElements({
+            'total-balance': utils.formatCurrency(data.total_balance),
+            'available-balance': utils.formatCurrency(data.available_balance),
+            'open-positions-detail': data.open_positions,
+            'portfolio-pnl': utils.formatCurrency(data.total_pnl),
+            'win-rate': utils.formatPercent(data.win_rate || 0),
+            'sharpe-ratio': (data.sharpe_ratio || 0).toFixed(1),
+            'api-status': 'Connected',
+            'data-freshness': '2 min',
+            'memory-usage': '65%'
+        });
+    },
     
-    if (holdings.length === 0) {
-        portfolioChart.data.labels = ['No Holdings'];
-        portfolioChart.data.datasets[0].data = [1];
-        portfolioChart.data.datasets[0].backgroundColor = ['#6c757d'];
-        portfolioChart.update();
-        updatePortfolioLegend([]);
-        return;
-    }
+    updatePortfolioDetails(data) {
+        if (data.error) {
+            console.warn('Portfolio details error:', data.error);
+            this.updatePortfolioTable([]);
+            this.updatePortfolioChart([]);
+            return;
+        }
+        
+        const holdings = data.holdings || [];
+        this.updatePortfolioTable(holdings);
+        this.updatePortfolioChart(holdings);
+    },
     
-    // Prepare chart data
-    const labels = holdings.map(h => h.symbol);
-    const data = holdings.map(h => h.balance);
-    const colors = portfolioChart.data.datasets[0].backgroundColor.slice(0, holdings.length);
+    updatePortfolioTable(holdings) {
+        if (!domRefs.portfolioTbody) return;
+        
+        if (holdings.length === 0) {
+            domRefs.portfolioTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Geen portfolio bezittingen beschikbaar</td></tr>';
+            return;
+        }
+        
+        domRefs.portfolioTbody.innerHTML = holdings.map(holding => {
+            const pnlClass = holding.pnl >= 0 ? 'text-success' : 'text-danger';
+            const statusClass = holding.status === 'open' ? 'badge bg-success' : 'badge bg-secondary';
+            
+            return `
+                <tr>
+                    <td><strong>${holding.symbol}</strong></td>
+                    <td><span class="badge ${holding.side === 'buy' ? 'bg-success' : 'bg-danger'}">${holding.side}</span></td>
+                    <td>${holding.quantity_filled.toFixed(4)}</td>
+                    <td><span class="${statusClass}">${holding.status}</span></td>
+                    <td class="${pnlClass}">${utils.formatCurrency(holding.pnl)}</td>
+                    <td>${utils.formatCurrency(holding.balance)} <small class="text-muted">(${holding.percentage.toFixed(1)}%)</small></td>
+                </tr>
+            `;
+        }).join('');
+    },
     
-    // Update chart
-    portfolioChart.data.labels = labels;
-    portfolioChart.data.datasets[0].data = data;
-    portfolioChart.data.datasets[0].backgroundColor = colors;
-    portfolioChart.update();
+    updatePortfolioChart(holdings) {
+        if (!domRefs.portfolioChart) return;
+        
+        if (holdings.length === 0) {
+            utils.ensureChartDataOrPlaceholder(domRefs.portfolioChart, ['Geen data'], [1], 'Geen data');
+            this.updatePortfolioLegend([]);
+            return;
+        }
+        
+        // Prepare chart data
+        const labels = holdings.map(h => h.symbol);
+        const data = holdings.map(h => h.balance);
+        const colors = domRefs.portfolioChart.data.datasets[0].backgroundColor.slice(0, holdings.length);
+        
+        // Update chart
+        domRefs.portfolioChart.data.labels = labels;
+        domRefs.portfolioChart.data.datasets[0].data = data;
+        domRefs.portfolioChart.data.datasets[0].backgroundColor = colors;
+        domRefs.portfolioChart.update();
+        
+        // Update custom legend
+        this.updatePortfolioLegend(holdings);
+    },
     
-    // Update custom legend
-    updatePortfolioLegend(holdings);
-}
-
-/**
- * Update portfolio legend
- */
-function updatePortfolioLegend(holdings) {
-    const legendDiv = document.getElementById('portfolio-legend');
-    
-    if (holdings.length === 0) {
-        legendDiv.innerHTML = '<div class="text-center text-muted">No holdings to display</div>';
-        return;
-    }
-    
-    const colors = portfolioChart.data.datasets[0].backgroundColor;
-    
-    legendDiv.innerHTML = holdings.map((holding, index) => {
-        const color = colors[index] || '#6c757d';
-        return `
-            <div class="d-flex justify-content-between align-items-center mb-1">
-                <div class="d-flex align-items-center">
-                    <div class="me-2" style="width: 12px; height: 12px; background-color: ${color}; border-radius: 2px;"></div>
-                    <span class="small">${holding.symbol}</span>
+    updatePortfolioLegend(holdings) {
+        if (!domRefs.portfolioLegend) return;
+        
+        if (holdings.length === 0) {
+            domRefs.portfolioLegend.innerHTML = '<div class="text-center text-muted">Geen holdings</div>';
+            return;
+        }
+        
+        const colors = domRefs.portfolioChart.data.datasets[0].backgroundColor;
+        
+        domRefs.portfolioLegend.innerHTML = holdings.map((holding, index) => {
+            const color = colors[index] || '#6c757d';
+            return `
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <div class="d-flex align-items-center">
+                        <div class="me-2" style="width: 12px; height: 12px; background-color: ${color}; border-radius: 2px;"></div>
+                        <span class="small">${holding.symbol}</span>
+                    </div>
+                    <div class="text-end">
+                        <div class="small fw-bold">${utils.formatCurrency(holding.balance)}</div>
+                        <div class="small text-muted">${holding.percentage.toFixed(1)}%</div>
+                    </div>
                 </div>
-                <div class="text-end">
-                    <div class="small fw-bold">${formatCurrency(holding.balance)}</div>
-                    <div class="small text-muted">${holding.percentage.toFixed(1)}%</div>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-/**
- * Update equity curve chart
- */
-function updateEquityCurve(data) {
+            `;
+        }).join('');
+    },
+    
+    updateEquityCurve(data) {
     if (data.error) {
         console.warn('Equity curve data error:', data.error);
         return;
     }
     
-    if (equityChart && data.labels && data.data) {
-        equityChart.data.labels = data.labels;
-        equityChart.data.datasets[0].data = data.data;
-        equityChart.update();
-    }
-}
-
-/**
- * Update bot status section
- */
-function updateBotStatus(data) {
+        if (domRefs.equityChart && data.labels && data.data) {
+            utils.ensureChartDataOrPlaceholder(domRefs.equityChart, data.labels, data.data, 'Startkapitaal');
+        }
+    },
+    
+    updateBotStatus(data) {
     if (data.error) {
         console.warn('Bot status data error:', data.error);
         return;
     }
     
-    // Update bot status (safely)
+        // Update bot status (safely)
     const statusElement = document.getElementById('bot-status');
     const statusBadge = document.getElementById('pi-status');
     
-    if (statusElement && statusBadge) {
+        if (statusElement && statusBadge) {
     if (data.pi_online) {
-        statusElement.textContent = 'Online';
-        statusElement.className = 'text-success';
-        statusBadge.textContent = 'Online';
-        statusBadge.className = 'badge bg-success';
+                this.renderStatusBadge(statusElement, 'online');
+                this.renderStatusBadge(statusBadge, 'online');
     } else {
-        statusElement.textContent = 'Offline';
-        statusElement.className = 'text-danger';
-        statusBadge.textContent = 'Offline';
-        statusBadge.className = 'badge bg-danger';
+                this.renderStatusBadge(statusElement, 'offline');
+                this.renderStatusBadge(statusBadge, 'offline');
+            }
         }
-    }
-    
-    // Update system status (safely)
-    safeUpdateElement('last-sync', formatDateTime(data.last_sync));
-    safeUpdateElement('data-files', data.data_files);
-}
-
-/**
- * Update bot activity section
- */
-function updateBotActivity(data) {
-    console.log('Updating bot activity with data:', data);
-    
-    if (data.error) {
-        console.warn('Bot activity data error:', data.error);
-        updateBotActivityTable([]);
-        updateBotPerformanceMetrics({});
-        return;
-    }
-
-    try {
-        // Update bot activity metrics
-        const uptimeEl = document.getElementById('bot-uptime');
-        const frequencyEl = document.getElementById('decision-frequency');
-        const nextCheckEl = document.getElementById('next-check');
         
-        if (uptimeEl) uptimeEl.textContent = data.uptime || '0h 0m';
-        if (frequencyEl) frequencyEl.textContent = data.decision_frequency || '0/hour';
-        if (nextCheckEl) nextCheckEl.textContent = data.next_check || '--:--';
-
-        // Update activity timeline
-        updateBotActivityTable(data.activity_timeline || []);
-
-        // Update performance metrics
-        updateBotPerformanceMetrics(data.performance_metrics || {});
-
-        // Update performance bars
-        updatePerformanceBars(data);
+        // Update system status (safely)
+        utils.safeUpdateElement('last-sync', this.formatDateTime(data.last_sync));
+        utils.safeUpdateElement('data-files', data.data_files);
+    },
+    
+    updateBotActivity(data) {
+        console.log('Updating bot activity with data:', data);
         
-        // Update decision thresholds
-        updateDecisionThresholds(data.decision_thresholds || {});
-        
-        // Update recent decisions
-        updateRecentDecisions(data.recent_decisions || []);
-        
-        console.log('Bot activity updated successfully');
-    } catch (error) {
-        console.error('Error updating bot activity:', error);
-    }
-}
-
-/**
- * Update bot activity timeline table
- */
-function updateBotActivityTable(activities) {
-    const tbody = document.getElementById('bot-activity-tbody');
-    
-    if (activities.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Geen bot activiteit geregistreerd</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = activities.map(activity => {
-        const statusClass = getStatusClass(activity.status);
-        const timeFormatted = formatTime(activity.time);
-        
-        return `
-            <tr>
-                <td><small>${timeFormatted}</small></td>
-                <td><span class="badge bg-primary">${activity.action}</span></td>
-                <td>${activity.decision}</td>
-                <td><small class="text-muted">${activity.reason}</small></td>
-                <td><span class="badge ${statusClass}">${activity.status}</span></td>
-            </tr>
-        `;
-    }).join('');
-}
-
-/**
- * Update bot performance metrics
- */
-function updateBotPerformanceMetrics(metrics) {
-    safeUpdateElement('success-rate', (metrics.success_rate || 0) + '%');
-    safeUpdateElement('avg-decision-time', (metrics.avg_decision_time || 0) + 'ms');
-}
-
-/**
- * Update performance bars
- */
-function updatePerformanceBars(data) {
-    // Market Analysis
-    const marketAnalysis = data.market_analysis || {score: 0, description: "Marktanalyse", details: "Geen data", status: "Unknown"};
-    const marketScore = typeof marketAnalysis === 'object' ? marketAnalysis.score : marketAnalysis;
-    safeUpdateElement('market-analysis-label', marketAnalysis.description || "Marktanalyse");
-    safeUpdateElement('market-analysis-score', marketScore + '%');
-    const marketBar = document.getElementById('market-analysis-bar');
-    if (marketBar) {
-        marketBar.style.width = marketScore + '%';
-        marketBar.className = `progress-bar ${getProgressBarClass(marketScore)}`;
-    }
-    safeUpdateElement('market-analysis-details', marketAnalysis.details || "Geen data");
-    
-    // Risk Assessment
-    const riskAssessment = data.risk_assessment || {score: 0, description: "Risico Beoordeling", details: "Geen data", status: "Unknown"};
-    const riskScore = typeof riskAssessment === 'object' ? riskAssessment.score : riskAssessment;
-    safeUpdateElement('risk-assessment-label', riskAssessment.description || "Risico Beoordeling");
-    safeUpdateElement('risk-assessment-score', riskScore + '%');
-    const riskBar = document.getElementById('risk-assessment-bar');
-    if (riskBar) {
-        riskBar.style.width = riskScore + '%';
-        riskBar.className = `progress-bar ${getRiskBarClass(riskScore)}`;
-    }
-    safeUpdateElement('risk-assessment-details', riskAssessment.details || "Geen data");
-    
-    // Execution Speed
-    const executionSpeed = data.execution_speed || {score: 0, description: "Data Sync Snelheid", details: "Geen data", status: "Unknown"};
-    const speedScore = typeof executionSpeed === 'object' ? executionSpeed.score : executionSpeed;
-    safeUpdateElement('execution-speed-label', executionSpeed.description || "Data Sync Snelheid");
-    safeUpdateElement('execution-speed-score', speedScore + '%');
-    const speedBar = document.getElementById('execution-speed-bar');
-    if (speedBar) {
-        speedBar.style.width = speedScore + '%';
-        speedBar.className = `progress-bar ${getSpeedBarClass(speedScore)}`;
-    }
-    safeUpdateElement('execution-speed-details', executionSpeed.details || "Geen data");
-}
-
-/**
- * Get status class for activity status
- */
-function getStatusClass(status) {
-    switch (status.toLowerCase()) {
-        case 'success':
-        case 'completed':
-        case 'active':
-        case 'online':
-        case 'veilig':
-        case 'succesvol':
-            return 'bg-success';
-        case 'warning':
-        case 'pending':
-        case 'monitoring':
-        case 'geen actie':
-            return 'bg-warning';
-        case 'error':
-        case 'failed':
-        case 'offline':
-            return 'bg-danger';
-        case 'info':
-        case 'neutral':
-            return 'bg-info';
-        default:
-            return 'bg-secondary';
-    }
-}
-
-/**
- * Get progress bar class based on score
- */
-function getProgressBarClass(score) {
-    if (score >= 80) return 'bg-success';
-    if (score >= 60) return 'bg-info';
-    if (score >= 40) return 'bg-warning';
-    return 'bg-danger';
-}
-
-/**
- * Get risk bar class based on score
- */
-function getRiskBarClass(score) {
-    if (score <= 30) return 'bg-success';  // Low risk
-    if (score <= 60) return 'bg-warning';  // Medium risk
-    return 'bg-danger';  // High risk
-}
-
-/**
- * Get speed bar class based on percentage
- */
-function getSpeedBarClass(percentage) {
-    if (percentage >= 80) return 'bg-success';  // Fast
-    if (percentage >= 60) return 'bg-info';     // Medium
-    if (percentage >= 40) return 'bg-warning';  // Slow
-    return 'bg-danger';  // Very slow
-}
-
-/**
- * Format time for activity timeline
- */
-function formatTime(timeString) {
-    if (!timeString) return '--:--';
-    
-    // If the timeString is already formatted (contains -), return as is
-    if (timeString.includes('-') && timeString.includes(':')) {
-        return timeString;
-    }
-    
-    try {
-        const date = new Date(timeString);
-        if (isNaN(date.getTime())) {
-            return timeString; // Return original if can't parse
+        if (data.error) {
+            console.warn('Bot activity data error:', data.error);
+            this.updateBotActivityTable([]);
+            this.updateBotPerformanceMetrics({});
+            return;
         }
-        return date.toLocaleTimeString('en-US', { 
-            hour12: false, 
-            hour: '2-digit', 
-            minute: '2-digit' 
+
+        try {
+            // Update bot activity metrics
+            utils.safeUpdateElements({
+                'bot-uptime': data.uptime || '0h 0m',
+                'decision-frequency': data.decision_frequency || '0/hour',
+                'next-check': data.next_check || '--:--'
+            });
+
+            // Update activity timeline (combine with decisions)
+            this.updateBotActivityTable(data.activity_timeline || [], data.recent_decisions || []);
+
+            // Update performance metrics
+            this.updateBotPerformanceMetrics(data.performance_metrics || {});
+
+            // Update performance bars
+            this.updatePerformanceBars(data);
+            
+            // Update decision thresholds
+            this.updateDecisionThresholds(data.decision_thresholds || {});
+            
+            
+            console.log('Bot activity updated successfully');
+        } catch (error) {
+            console.error('Error updating bot activity:', error);
+        }
+    },
+    
+    updateBotActivityTable(activities, decisions = []) {
+        if (!domRefs.botActivityTbody) return;
+        
+        // Convert decisions to activity format
+        const decisionActivities = decisions.map(decision => ({
+            timestamp: decision.timestamp,
+            action: decision.action,
+            decision: decision.decision,
+            reason: decision.reason,
+            status: decision.status
+        }));
+        
+        // Combine activities and decisions, sort by timestamp (newest first)
+        const allActivities = [...activities, ...decisionActivities]
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            .slice(0, 10); // Show max 10 items
+        
+        if (allActivities.length === 0) {
+            domRefs.botActivityTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Geen bot activiteit geregistreerd</td></tr>';
+            return;
+        }
+        
+        domRefs.botActivityTbody.innerHTML = allActivities.map(activity => {
+            const statusClass = this.getStatusClass(activity.status);
+            const timeFormatted = this.formatTime(activity.timestamp || activity.time);
+            
+            return `
+                <tr>
+                    <td><small>${timeFormatted}</small></td>
+                    <td><span class="badge bg-primary">${activity.action}</span></td>
+                    <td>${activity.decision}</td>
+                    <td><small class="text-muted">${activity.reason}</small></td>
+                    <td><span class="badge ${statusClass}">${activity.status}</span></td>
+                </tr>
+            `;
+        }).join('');
+    },
+    
+    updateBotPerformanceMetrics(metrics) {
+        utils.safeUpdateElements({
+            'success-rate': utils.formatPercent(metrics.success_rate || 0),
+            'avg-decision-time': (metrics.avg_decision_time || 0) + 'ms'
         });
-    } catch (error) {
-        return timeString;
+    },
+    
+    updatePerformanceBars(data) {
+        // Market Analysis
+        const marketAnalysis = data.market_analysis || {score: 0, description: "Marktanalyse", details: "Geen data", status: "Unknown"};
+        const marketScore = typeof marketAnalysis === 'object' ? marketAnalysis.score : marketAnalysis;
+        utils.safeUpdateElement('market-analysis-label', marketAnalysis.description || "Marktanalyse");
+        utils.safeUpdateElement('market-analysis-score', marketScore + '%');
+        const marketBar = document.getElementById('market-analysis-bar');
+        if (marketBar) {
+            marketBar.style.width = marketScore + '%';
+            marketBar.className = `progress-bar ${this.getProgressBarClass(marketScore)}`;
+        }
+        utils.safeUpdateElement('market-analysis-details', marketAnalysis.details || "Geen data");
+        
+        // Risk Assessment
+        const riskAssessment = data.risk_assessment || {score: 0, description: "Risico Beoordeling", details: "Geen data", status: "Unknown"};
+        const riskScore = typeof riskAssessment === 'object' ? riskAssessment.score : riskAssessment;
+        utils.safeUpdateElement('risk-assessment-label', riskAssessment.description || "Risico Beoordeling");
+        utils.safeUpdateElement('risk-assessment-score', riskScore + '%');
+        const riskBar = document.getElementById('risk-assessment-bar');
+        if (riskBar) {
+            riskBar.style.width = riskScore + '%';
+            riskBar.className = `progress-bar ${this.getRiskBarClass(riskScore)}`;
+        }
+        utils.safeUpdateElement('risk-assessment-details', riskAssessment.details || "Geen data");
+        
+        // Execution Speed
+        const executionSpeed = data.execution_speed || {score: 0, description: "Data Sync Snelheid", details: "Geen data", status: "Unknown"};
+        const speedScore = typeof executionSpeed === 'object' ? executionSpeed.score : executionSpeed;
+        utils.safeUpdateElement('execution-speed-label', executionSpeed.description || "Data Sync Snelheid");
+        utils.safeUpdateElement('execution-speed-score', speedScore + '%');
+        const speedBar = document.getElementById('execution-speed-bar');
+        if (speedBar) {
+            speedBar.style.width = speedScore + '%';
+            speedBar.className = `progress-bar ${this.getSpeedBarClass(speedScore)}`;
+        }
+        utils.safeUpdateElement('execution-speed-details', executionSpeed.details || "Geen data");
+    },
+    
+    updateDecisionThresholds(thresholds) {
+        console.log('Updating decision thresholds:', thresholds);
+        
+        if (!thresholds || Object.keys(thresholds).length === 0) {
+            console.log('No thresholds data available');
+            return;
+        }
+        
+        try {
+            utils.safeUpdateElements({
+                'price-threshold': thresholds.price_change_threshold || '2.5%',
+                'volume-threshold': thresholds.volume_threshold || '1000',
+                'rsi-oversold': thresholds.rsi_oversold || '30',
+                'rsi-overbought': thresholds.rsi_overbought || '70',
+                'stop-loss': thresholds.stop_loss || '3%',
+                'take-profit': thresholds.take_profit || '5%',
+                'max-position': thresholds.max_position_size || '10%',
+                'risk-per-trade': thresholds.risk_per_trade || '2%'
+            });
+            
+            console.log('Decision thresholds updated successfully');
+        } catch (error) {
+            console.error('Error updating decision thresholds:', error);
+        }
+    },
+    
+    
+    updateMLInsights(data) {
+        console.log('Updating ML insights:', data);
+        
+        if (data.error) {
+            console.warn('ML insights data error:', data.error);
+            return;
+        }
+        
+        try {
+            const modelPerf = data.model_performance || {};
+            const signalQuality = data.signal_quality || {};
+            
+            // Update model performance
+            utils.safeUpdateElements({
+                'predictions-today': modelPerf.predictions_today || '0',
+                'model-accuracy': utils.formatPercent(modelPerf.model_accuracy || 0),
+                'ml-confidence': utils.formatPercent(modelPerf.avg_confidence || 0),
+                'signal-strength': signalQuality.signal_strength || '0',
+                'regime-status': signalQuality.regime_status || 'Unknown',
+                'market-volatility': signalQuality.market_volatility || 'Unknown',
+                'trend-direction': signalQuality.trend_direction || 'Unknown'
+            });
+            
+            // Update feature importance
+            if (modelPerf.feature_importance) {
+                const container = document.getElementById('feature-importance');
+                if (container) {
+                    container.innerHTML = modelPerf.feature_importance.map(feature => `
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>${feature.feature}</span>
+                            <span>${(feature.importance * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="progress mb-2" style="height: 6px;">
+                            <div class="progress-bar" style="width: ${feature.importance * 100}%"></div>
+                        </div>
+                    `).join('');
+                }
+            }
+            
+            console.log('ML insights updated successfully');
+        } catch (error) {
+            console.error('Error updating ML insights:', error);
+        }
+    },
+    
+    updateMarketIntelligence(data) {
+        console.log('Updating market intelligence:', data);
+        
+        if (data.error) {
+            console.warn('Market intelligence data error:', data.error);
+            return;
+        }
+        
+        try {
+            const marketOverview = data.market_overview || {};
+            const riskManagement = data.risk_management || {};
+            
+            // Update market overview
+            utils.safeUpdateElements({
+                'volatility-index': marketOverview.volatility_index || '0',
+                'volume-analysis': marketOverview.volume_analysis || 'Unknown',
+                'risk-rejects': riskManagement.risk_rejects || '0',
+                'daily-loss': utils.formatCurrency(riskManagement.daily_loss || 0)
+            });
+            
+            const positionSizes = riskManagement.position_sizes || {};
+            utils.safeUpdateElements({
+                'max-position': positionSizes.max_position || '0%',
+                'avg-position': positionSizes.avg_position || '0%',
+                'total-exposure': positionSizes.total_exposure || '0%'
+            });
+            
+            const correlationMatrix = riskManagement.correlation_matrix || {};
+            utils.safeUpdateElements({
+                'btc-eth-correlation': (correlationMatrix.btc_eth || 0).toFixed(2),
+                'btc-ada-correlation': (correlationMatrix.btc_ada || 0).toFixed(2),
+                'eth-ada-correlation': (correlationMatrix.eth_ada || 0).toFixed(2)
+            });
+            
+            // Update top movers
+            if (marketOverview.top_movers) {
+                const container = document.getElementById('top-movers');
+                if (container) {
+                    container.innerHTML = marketOverview.top_movers.map(mover => `
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span><strong>${mover.symbol}</strong></span>
+                            <span class="${mover.change.startsWith('+') ? 'text-success' : 'text-danger'}">${mover.change}</span>
+                            <small class="text-muted">${mover.volume}</small>
+                        </div>
+                    `).join('');
+                }
+            }
+            
+            console.log('Market intelligence updated successfully');
+        } catch (error) {
+            console.error('Error updating market intelligence:', error);
+        }
+    },
+    
+    updateRealTimeAlerts(data) {
+        console.log('Updating real-time alerts:', data);
+        
+        if (data.error) {
+            console.warn('Real-time alerts data error:', data.error);
+            return;
+        }
+        
+        try {
+            // Update alert count
+            utils.safeUpdateElement('total-alerts', data.total_alerts || '0');
+            
+            // Update critical alerts
+            if (data.critical_alerts && domRefs.criticalAlerts) {
+                domRefs.criticalAlerts.innerHTML = data.critical_alerts.map(alert => `
+                    <div class="alert alert-${this.getAlertClass(alert.severity)}">
+                        <div class="d-flex justify-content-between">
+                            <span><i class="fas fa-${this.getAlertIcon(alert.type)}"></i> ${alert.message}</span>
+                            <small class="text-muted">${alert.timestamp}</small>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            // Update trading opportunities
+            if (data.trading_opportunities && domRefs.tradingOpportunities) {
+                domRefs.tradingOpportunities.innerHTML = data.trading_opportunities.map(opportunity => `
+                    <div class="alert alert-warning">
+                        <div class="d-flex justify-content-between">
+                            <span><i class="fas fa-signal"></i> ${opportunity.message}</span>
+                            <small class="text-muted">${opportunity.timestamp}</small>
+                        </div>
+                        <small class="text-muted">Confidence: ${opportunity.confidence}% - Status: ${opportunity.status}</small>
+                    </div>
+                `).join('');
+            }
+            
+            console.log('Real-time alerts updated successfully');
+        } catch (error) {
+            console.error('Error updating real-time alerts:', error);
+        }
+    },
+    
+    // Helper functions
+    getStatusClass(status) {
+        switch (status.toLowerCase()) {
+            case 'success':
+            case 'completed':
+            case 'active':
+            case 'online':
+            case 'veilig':
+            case 'succesvol':
+                return 'bg-success';
+            case 'warning':
+            case 'pending':
+            case 'monitoring':
+            case 'geen actie':
+                return 'bg-warning';
+            case 'error':
+            case 'failed':
+            case 'offline':
+                return 'bg-danger';
+            case 'info':
+            case 'neutral':
+                return 'bg-info';
+            default:
+                return 'bg-secondary';
+        }
+    },
+    
+    getProgressBarClass(score) {
+        if (score >= 80) return 'bg-success';
+        if (score >= 60) return 'bg-info';
+        if (score >= 40) return 'bg-warning';
+        return 'bg-danger';
+    },
+    
+    getRiskBarClass(score) {
+        if (score <= 30) return 'bg-success';  // Low risk
+        if (score <= 60) return 'bg-warning';  // Medium risk
+        return 'bg-danger';  // High risk
+    },
+    
+    getSpeedBarClass(percentage) {
+        if (percentage >= 80) return 'bg-success';  // Fast
+        if (percentage >= 60) return 'bg-info';     // Medium
+        if (percentage >= 40) return 'bg-warning';  // Slow
+        return 'bg-danger';  // Very slow
+    },
+    
+    getAlertClass(severity) {
+        switch (severity) {
+            case 'high': return 'danger';
+            case 'medium': return 'warning';
+            case 'low': return 'info';
+            default: return 'info';
+        }
+    },
+    
+    getAlertIcon(type) {
+        switch (type) {
+            case 'Error': return 'exclamation-triangle';
+            case 'Warning': return 'exclamation-circle';
+            case 'Info': return 'info-circle';
+            default: return 'info-circle';
+        }
+    },
+    
+    formatTime(timeString) {
+        if (!timeString) return '--:--';
+        
+        // If the timeString is already formatted (contains -), return as is
+        if (timeString.includes('-') && timeString.includes(':')) {
+            return timeString;
+        }
+        
+        try {
+            const date = new Date(timeString);
+            if (isNaN(date.getTime())) {
+                return timeString; // Return original if can't parse
+            }
+            return date.toLocaleTimeString('en-US', { 
+                hour12: false, 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+        } catch (error) {
+            return timeString;
+        }
+    },
+    
+    formatDateTime(dateString) {
+        if (!dateString) return 'Never';
+        
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        } catch (error) {
+            return 'Invalid Date';
+        }
     }
-}
+});
+
+// ============================================================================
+// AUTO-REFRESH & SYNC
+// ============================================================================
 
 /**
  * Start auto-refresh timer
@@ -779,12 +1054,16 @@ async function syncNow() {
     
     isSyncing = true;
     const syncButton = document.querySelector('button[onclick="syncNow()"]');
-    const icon = syncButton.querySelector('i');
+    const icon = syncButton?.querySelector('i');
     
     try {
         // Show syncing state
+        if (icon) {
         icon.className = 'fas fa-sync-alt syncing';
+        }
+        if (syncButton) {
         syncButton.disabled = true;
+        }
         
         console.log('🔄 Triggering manual sync...');
         
@@ -813,122 +1092,22 @@ async function syncNow() {
         
     } catch (error) {
         console.error('❌ Error during manual sync:', error);
-        showError('Synchronisatie fout: ' + error.message);
+        showError('Synchronisatie fout: ' + error);
     } finally {
         // Reset button state
+        if (icon) {
         icon.className = 'fas fa-sync-alt';
+        }
+        if (syncButton) {
         syncButton.disabled = false;
+        }
         isSyncing = false;
     }
 }
 
-/**
- * Update last update time
- */
-function updateLastUpdateTime() {
-    const now = new Date();
-    const timeString = now.toLocaleTimeString();
-    safeUpdateElement('last-update-time', timeString);
-}
-
-/**
- * Format currency values
- */
-function formatCurrency(value) {
-    if (value === null || value === undefined) return '€0.00';
-    return '€' + parseFloat(value).toLocaleString('nl-NL', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
-
-/**
- * Format date/time values
- */
-function formatDateTime(dateString) {
-    if (!dateString) return 'Never';
-    
-    try {
-        const date = new Date(dateString);
-        return date.toLocaleString();
-    } catch (error) {
-        return 'Invalid Date';
-    }
-}
-
-/**
- * Update decision thresholds
- */
-function updateDecisionThresholds(thresholds) {
-    console.log('Updating decision thresholds:', thresholds);
-    
-    if (!thresholds || Object.keys(thresholds).length === 0) {
-        console.log('No thresholds data available');
-        return;
-    }
-    
-    try {
-        // Update threshold values
-        const priceEl = document.getElementById('price-threshold');
-        const volumeEl = document.getElementById('volume-threshold');
-        const rsiOversoldEl = document.getElementById('rsi-oversold');
-        const rsiOverboughtEl = document.getElementById('rsi-overbought');
-        const stopLossEl = document.getElementById('stop-loss');
-        const takeProfitEl = document.getElementById('take-profit');
-        const maxPositionEl = document.getElementById('max-position');
-        const riskPerTradeEl = document.getElementById('risk-per-trade');
-        
-        if (priceEl) priceEl.textContent = thresholds.price_change_threshold || '2.5%';
-        if (volumeEl) volumeEl.textContent = thresholds.volume_threshold || '1000';
-        if (rsiOversoldEl) rsiOversoldEl.textContent = thresholds.rsi_oversold || '30';
-        if (rsiOverboughtEl) rsiOverboughtEl.textContent = thresholds.rsi_overbought || '70';
-        if (stopLossEl) stopLossEl.textContent = thresholds.stop_loss || '3%';
-        if (takeProfitEl) takeProfitEl.textContent = thresholds.take_profit || '5%';
-        if (maxPositionEl) maxPositionEl.textContent = thresholds.max_position_size || '10%';
-        if (riskPerTradeEl) riskPerTradeEl.textContent = thresholds.risk_per_trade || '2%';
-        
-        console.log('Decision thresholds updated successfully');
-    } catch (error) {
-        console.error('Error updating decision thresholds:', error);
-    }
-}
-
-/**
- * Update recent decisions table
- */
-function updateRecentDecisions(decisions) {
-    console.log('Updating recent decisions:', decisions);
-    
-    const tbody = document.getElementById('recent-decisions-tbody');
-    if (!tbody) {
-        console.error('Recent decisions tbody element not found');
-        return;
-    }
-    
-    if (decisions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Geen recente besluiten</td></tr>';
-        return;
-    }
-    
-    try {
-        tbody.innerHTML = decisions.map(decision => {
-            const statusClass = getStatusClass(decision.status);
-            
-            return `
-                <tr>
-                    <td><small>${decision.timestamp}</small></td>
-                    <td><span class="badge bg-primary">${decision.action}</span></td>
-                    <td>${decision.decision}</td>
-                    <td><span class="badge ${statusClass}">${decision.status}</span></td>
-                </tr>
-            `;
-        }).join('');
-        
-        console.log('Recent decisions updated successfully');
-    } catch (error) {
-        console.error('Error updating recent decisions:', error);
-    }
-}
+// ============================================================================
+// ALERT FUNCTIONS
+// ============================================================================
 
 /**
  * Show success message
@@ -968,6 +1147,10 @@ function showAlert(message, type) {
     }, 5000);
 }
 
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
 /**
  * Handle page visibility change
  */
@@ -989,185 +1172,271 @@ document.addEventListener('visibilitychange', function() {
  */
 window.addEventListener('resize', function() {
     // Resize charts when window resizes
-    if (equityChart) {
-        equityChart.resize();
+    if (domRefs.equityChart) {
+        domRefs.equityChart.resize();
     }
-    if (winLossChart) {
-        winLossChart.resize();
+    if (domRefs.winLossChart) {
+        domRefs.winLossChart.resize();
     }
-    if (portfolioChart) {
-        portfolioChart.resize();
+    if (domRefs.portfolioChart) {
+        domRefs.portfolioChart.resize();
     }
 });
 
+// ============================================================================
+// PANEL COLLAPSE FUNCTIONALITY
+// ============================================================================
+
 /**
- * Update ML Insights section
+ * Initialize panel collapse functionality
  */
-function updateMLInsights(data) {
-    console.log('Updating ML insights:', data);
+function initializePanelCollapse() {
+    console.log('🔧 Initializing panel collapse...');
     
-    if (data.error) {
-        console.warn('ML insights data error:', data.error);
-        return;
-    }
-    
-    try {
-        const modelPerf = data.model_performance || {};
-        const signalQuality = data.signal_quality || {};
-        
-        // Update model performance
-        safeUpdateElement('predictions-today', modelPerf.predictions_today || '0');
-        safeUpdateElement('model-accuracy', (modelPerf.model_accuracy || 0) + '%');
-        safeUpdateElement('ml-confidence', (modelPerf.avg_confidence || 0) + '%');
-        
-        // Update signal quality
-        safeUpdateElement('signal-strength', signalQuality.signal_strength || '0');
-        safeUpdateElement('regime-status', signalQuality.regime_status || 'Unknown');
-        safeUpdateElement('market-volatility', signalQuality.market_volatility || 'Unknown');
-        safeUpdateElement('trend-direction', signalQuality.trend_direction || 'Unknown');
-        
-        // Update feature importance
-        if (modelPerf.feature_importance) {
-            const container = document.getElementById('feature-importance');
-            container.innerHTML = modelPerf.feature_importance.map(feature => `
-                <div class="d-flex justify-content-between mb-1">
-                    <span>${feature.feature}</span>
-                    <span>${(feature.importance * 100).toFixed(0)}%</span>
-                </div>
-                <div class="progress mb-2" style="height: 6px;">
-                    <div class="progress-bar" style="width: ${feature.importance * 100}%"></div>
-                </div>
-            `).join('');
+    // Event delegation for panel headers
+    document.addEventListener('click', (e) => {
+        const header = e.target.closest('.panel-header');
+        if (!header) {
+            console.log('🔧 Click not on panel header');
+            return;
         }
         
-        console.log('ML insights updated successfully');
-    } catch (error) {
-        console.error('Error updating ML insights:', error);
+        console.log('🔧 Panel header clicked!');
+        const panel = header.closest('.panel');
+        const expanded = header.getAttribute('aria-expanded') === 'true';
+        
+        console.log('🔧 Panel expanded:', expanded, '->', !expanded);
+        header.setAttribute('aria-expanded', String(!expanded));
+        panel.setAttribute('aria-expanded', String(!expanded));
+    });
+    
+    // Global controls
+    const collapseAll = document.getElementById('collapse-all');
+    const expandAll = document.getElementById('expand-all');
+    
+    if (collapseAll) {
+        collapseAll.addEventListener('click', () => {
+            console.log('🔧 Collapse all clicked');
+            setAllPanels(false);
+        });
+    }
+    
+    if (expandAll) {
+        expandAll.addEventListener('click', () => {
+            console.log('🔧 Expand all clicked');
+            setAllPanels(true);
+        });
+    }
+    
+    console.log('✅ Panel collapse functionality initialized');
+}
+
+/**
+ * Set all panels to expanded or collapsed
+ */
+function setAllPanels(expand = true) {
+    document.querySelectorAll('.panel').forEach(p => {
+        p.setAttribute('aria-expanded', String(expand));
+        p.querySelector('.panel-header')?.setAttribute('aria-expanded', String(expand));
+    });
+}
+
+// ============================================================================
+// KPI COLOR LOGIC
+// ============================================================================
+
+/**
+ * Determine KPI class based on metric and value
+ */
+function kpiClassFromMetric(key, value) {
+    const T = {
+        // Portfolio metrics
+        portfolio: { ok: 1000, warn: 500 },     // portfolio waarde
+        pnl: { ok: 0, warn: -100 },             // positief = goed
+        positions: { ok: 5, warn: 10, invert: true }, // minder posities = beter
+        risk: { ok: 3, warn: 5, invert: true }, // lager = beter
+        
+        // Performance metrics
+        winrate: { ok: 0.6, warn: 0.5 },       // ≥60% groen, 50–60% oranje, <50% rood
+        sharpe: { ok: 1.2, warn: 0.8 },
+        drawdown: { ok: 0.1, warn: 0.2, invert: true }, // lager = beter
+        
+        // ML metrics
+        accuracy: { ok: 0.8, warn: 0.6 },      // model accuracy
+        confidence: { ok: 0.8, warn: 0.6 },    // model confidence
+        latency: { ok: 100, warn: 500, invert: true }, // lager = beter
+        
+        // System metrics
+        uptime: { ok: 24, warn: 12 },          // hours uptime
+        errors: { ok: 0, warn: 5, invert: true }, // lager = beter
+        alerts: { ok: 0, warn: 3, invert: true } // lager = beter
+    };
+    
+    const t = T[key];
+    if (!t) return 'ok'; // default to ok if no threshold defined
+    
+    if (t.invert) {
+        if (value <= t.ok) return 'ok';
+        if (value <= t.warn) return 'warn';
+        return 'risk';
+    } else {
+        if (value >= t.ok) return 'ok';
+        if (value >= t.warn) return 'warn';
+        return 'risk';
     }
 }
 
 /**
- * Update Market Intelligence section
+ * Render KPI with appropriate color class
  */
-function updateMarketIntelligence(data) {
-    console.log('Updating market intelligence:', data);
+function renderKpi(el, { key, label, value, fmt }) {
+    if (!el) return;
     
-    if (data.error) {
-        console.warn('Market intelligence data error:', data.error);
-        return;
-    }
+    const state = kpiClassFromMetric(key, value);
+    el.className = `kpi ${state}`;
+    el.innerHTML = `
+        <div class="label">${label}</div>
+        <div class="value">${fmt ? fmt(value) : value}</div>
+    `;
+}
+
+// ============================================================================
+// TOOLTIP FUNCTIONALITY
+// ============================================================================
+
+/**
+ * Initialize tooltip functionality
+ */
+function initializeTooltips() {
+    console.log('🔧 Initializing tooltips...');
+    let tooltipEl;
     
-    try {
-        const marketOverview = data.market_overview || {};
-        const riskManagement = data.risk_management || {};
-        
-        // Update market overview
-        safeUpdateElement('volatility-index', marketOverview.volatility_index || '0');
-        safeUpdateElement('volume-analysis', marketOverview.volume_analysis || 'Unknown');
-        
-        // Update risk management
-        safeUpdateElement('risk-rejects', riskManagement.risk_rejects || '0');
-        safeUpdateElement('daily-loss', formatCurrency(riskManagement.daily_loss || 0));
-        
-        const positionSizes = riskManagement.position_sizes || {};
-        safeUpdateElement('max-position', positionSizes.max_position || '0%');
-        safeUpdateElement('avg-position', positionSizes.avg_position || '0%');
-        safeUpdateElement('total-exposure', positionSizes.total_exposure || '0%');
-        
-        const correlationMatrix = riskManagement.correlation_matrix || {};
-        safeUpdateElement('btc-eth-correlation', (correlationMatrix.btc_eth || 0).toFixed(2));
-        safeUpdateElement('btc-ada-correlation', (correlationMatrix.btc_ada || 0).toFixed(2));
-        safeUpdateElement('eth-ada-correlation', (correlationMatrix.eth_ada || 0).toFixed(2));
-        
-        // Update top movers
-        if (marketOverview.top_movers) {
-            const container = document.getElementById('top-movers');
-            container.innerHTML = marketOverview.top_movers.map(mover => `
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span><strong>${mover.symbol}</strong></span>
-                    <span class="${mover.change.startsWith('+') ? 'text-success' : 'text-danger'}">${mover.change}</span>
-                    <small class="text-muted">${mover.volume}</small>
-                </div>
-            `).join('');
+    function showTooltip(target) {
+        const text = target.getAttribute('data-tooltip');
+        if (!text) {
+            console.log('🔧 No tooltip text found');
+            return;
         }
         
-        console.log('Market intelligence updated successfully');
-    } catch (error) {
-        console.error('Error updating market intelligence:', error);
+        console.log('🔧 Showing tooltip:', text.substring(0, 50) + '...');
+        tooltipEl ??= Object.assign(document.createElement('div'), { className: 'tooltip' });
+        tooltipEl.textContent = text;
+        document.body.appendChild(tooltipEl);
+        
+        const r = target.getBoundingClientRect();
+        
+        // Simple positioning - always below the button
+        const left = r.left + r.width / 2;
+        const top = r.bottom + 8;
+        
+        tooltipEl.style.left = `${left}px`;
+        tooltipEl.style.top = `${top}px`;
+        tooltipEl.style.transform = 'translate(-50%, 0)';
+        
+        requestAnimationFrame(() => tooltipEl.classList.add('visible'));
     }
-}
-
-/**
- * Update Real-time Alerts section
- */
-function updateRealTimeAlerts(data) {
-    console.log('Updating real-time alerts:', data);
     
-    if (data.error) {
-        console.warn('Real-time alerts data error:', data.error);
-        return;
+    function hideTooltip() {
+        tooltipEl?.classList.remove('visible');
     }
     
-    try {
-        // Update alert count
-        safeUpdateElement('total-alerts', data.total_alerts || '0');
-        
-        // Update critical alerts
-        if (data.critical_alerts) {
-            const container = document.getElementById('critical-alerts');
-            container.innerHTML = data.critical_alerts.map(alert => `
-                <div class="alert alert-${getAlertClass(alert.severity)}">
-                    <div class="d-flex justify-content-between">
-                        <span><i class="fas fa-${getAlertIcon(alert.type)}"></i> ${alert.message}</span>
-                        <small class="text-muted">${alert.timestamp}</small>
-                    </div>
-                </div>
-            `).join('');
+    document.addEventListener('mouseover', e => {
+        const t = e.target.closest('.info-btn');
+        if (t) {
+            console.log('🔧 Info button hovered');
+            showTooltip(t);
         }
-        
-        // Update trading opportunities
-        if (data.trading_opportunities) {
-            const container = document.getElementById('trading-opportunities');
-            container.innerHTML = data.trading_opportunities.map(opportunity => `
-                <div class="alert alert-warning">
-                    <div class="d-flex justify-content-between">
-                        <span><i class="fas fa-signal"></i> ${opportunity.message}</span>
-                        <small class="text-muted">${opportunity.timestamp}</small>
-                    </div>
-                    <small class="text-muted">Confidence: ${opportunity.confidence}% - Status: ${opportunity.status}</small>
-                </div>
-            `).join('');
+    });
+    
+    document.addEventListener('mouseout', e => {
+        if (e.target.closest('.info-btn')) {
+            console.log('🔧 Info button unhovered');
+            hideTooltip();
         }
+    });
+    
+    console.log('✅ Tooltip functionality initialized');
+}
+
+// ============================================================================
+// ENHANCED UI RENDERERS
+// ============================================================================
+
+// Extend ui object with KPI rendering
+Object.assign(ui, {
+    updateKPIs(data) {
+        // Portfolio KPI
+        renderKpi(document.getElementById('kpi-portfolio'), {
+            key: 'portfolio',
+            label: '💰 Portfolio Waarde',
+            value: data.total_balance || 1000,
+            fmt: v => utils.formatCurrency(v)
+        });
         
-        console.log('Real-time alerts updated successfully');
-    } catch (error) {
-        console.error('Error updating real-time alerts:', error);
+        // Daily P&L KPI
+        renderKpi(document.getElementById('kpi-daily-pnl'), {
+            key: 'pnl',
+            label: '📈 Dagelijkse P&L',
+            value: data.daily_pnl || 0,
+            fmt: v => utils.formatCurrency(v)
+        });
+        
+        // Open Positions KPI
+        renderKpi(document.getElementById('kpi-positions'), {
+            key: 'positions',
+            label: '📊 Open Posities',
+            value: data.open_positions || 0,
+            fmt: v => v.toString()
+        });
+        
+        // Risk Score KPI
+        renderKpi(document.getElementById('kpi-risk'), {
+            key: 'risk',
+            label: '⚠️ Risico Score',
+            value: data.risk_score || 3.5,
+            fmt: v => v.toFixed(1)
+        });
     }
-}
+});
 
-/**
- * Get alert CSS class based on severity
- */
-function getAlertClass(severity) {
-    switch (severity) {
-        case 'high': return 'danger';
-        case 'medium': return 'warning';
-        case 'low': return 'info';
-        default: return 'info';
-    }
-}
+// ============================================================================
+// ENHANCED INITIALIZATION
+// ============================================================================
 
-/**
- * Get alert icon based on type
- */
-function getAlertIcon(type) {
-    switch (type) {
-        case 'Error': return 'exclamation-triangle';
-        case 'Warning': return 'exclamation-circle';
-        case 'Info': return 'info-circle';
-        default: return 'info-circle';
-    }
-}
+// Update the main initialization to include new functionality
+const originalDOMContentLoaded = document.addEventListener;
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Initializing Enhanced Trading Bot Dashboard...');
+    
+    // Initialize DOM references
+    initializeDOMReferences();
+    
+    // Initialize Bootstrap components
+    initializeBootstrapComponents();
+    
+    // Initialize new functionality
+    initializePanelCollapse();
+    initializeTooltips();
+    
+    // Initialize charts
+    initializeCharts();
+    
+    // Load initial data
+    loadAllData();
+    
+    // Start auto-refresh
+    startAutoRefresh();
+    
+    console.log('✅ Enhanced Dashboard initialized');
+});
 
-// Export functions for global access
+// ============================================================================
+// EXPORT FUNCTIONS FOR GLOBAL ACCESS
+// ============================================================================
 window.syncNow = syncNow;
+window.setAllPanels = setAllPanels;
+window.renderKpi = renderKpi;
+
+// ============================================================================
+// END OF MODULAR DASHBOARD.JS
+// ============================================================================

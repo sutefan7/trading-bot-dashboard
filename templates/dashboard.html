@@ -15,49 +15,172 @@
         .bg-danger { background-color: #dc3545 !important; }
         .bg-warning { background-color: #ffc107 !important; }
         .text-white { color: white !important; }
+        
+        /* ============================================================================
+           UNIFORME PANEL STRUCTUUR & KLEURENLOGICA
+           ============================================================================ */
+        
+        /* CSS Variabelen (thema) */
+        :root {
+            --ok: #16a34a;        /* groen */
+            --warn: #f59e0b;      /* oranje */
+            --risk: #dc2626;      /* rood */
+            --muted: #64748b;
+            --border: #e5e7eb;
+            --focus: #3b82f6;
+        }
+        
+        /* Panel structuur */
+        .panel { 
+            border-radius: 12px; 
+            border: 1px solid var(--border); 
+            margin-bottom: 12px; 
+            overflow: hidden; 
+        }
+        
+        .panel-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            padding: 12px 14px; 
+            cursor: pointer; 
+            background: #f8f9fa;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .panel-header:hover {
+            background: #e9ecef;
+        }
+        
+        .panel-body { 
+            display: block; 
+            padding: 16px;
+        }
+        
+        .panel[aria-expanded="false"] .panel-body { 
+            display: none; 
+        }
+        
+        .panel-header:focus-visible { 
+            outline: 2px solid var(--focus); 
+            outline-offset: 2px; 
+        }
+        
+        .chevron { 
+            transition: transform .2s ease; 
+            font-size: 1.2rem;
+            color: var(--muted);
+        }
+        
+        .panel[aria-expanded="false"] .chevron { 
+            transform: rotate(-90deg); 
+        }
+        
+        /* KPI styling */
+        .kpi { 
+            border: 1px solid var(--border); 
+            border-radius: 12px; 
+            padding: 14px; 
+        }
+        
+        .kpi.ok { 
+            background: color-mix(in srgb, var(--ok) 10%, white); 
+        }
+        
+        .kpi.warn { 
+            background: color-mix(in srgb, var(--warn) 12%, white); 
+        }
+        
+        .kpi.risk { 
+            background: color-mix(in srgb, var(--risk) 10%, white); 
+        }
+        
+        .kpi .label { 
+            color: var(--muted); 
+            font-size: .9rem; 
+        }
+        
+        .kpi .value { 
+            font-weight: 700; 
+            font-size: 1.4rem; 
+        }
+        
+        /* Info button styling */
+        .info-btn { 
+            border: 0; 
+            background: transparent; 
+            width: 24px; 
+            height: 24px; 
+            border-radius: 50%;
+            display: inline-grid; 
+            place-items: center; 
+            font-weight: 700; 
+            color: var(--muted); 
+            cursor: pointer;
+        }
+        
+        .info-btn:hover { 
+            background: #f3f4f6; 
+        }
+        
+        /* Tooltip styling */
+        .tooltip { 
+            position: fixed; 
+            transform: translate(-50%, -100%); 
+            background: #111827; 
+            color: #fff;
+            padding: 8px 12px; 
+            border-radius: 6px; 
+            font-size: .85rem; 
+            opacity: 0; 
+            pointer-events: none; 
+            transition: .12s; 
+            z-index: 1000;
+            max-width: 300px;
+            white-space: pre-line;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        .tooltip.visible { 
+            opacity: 1; 
+            transform: translate(-50%, -110%); 
+        }
+        
+        /* Legenda styling */
+        .legend { 
+            margin: 4px 0 12px; 
+        }
+        
+        .legend summary { 
+            cursor: pointer; 
+            color: var(--muted); 
+        }
+        
+        .legend .dot { 
+            display: inline-block; 
+            width: 10px; 
+            height: 10px; 
+            border-radius: 50%; 
+            margin-right: 6px; 
+            vertical-align: middle;
+        }
+        
+        /* Panel actions */
+        .panel-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .panel-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
     </style>
     
     <!-- Bootstrap JavaScript -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
-    <!-- Fallback Bootstrap JavaScript -->
-    <script>
-        // Fallback for Bootstrap functionality
-        if (typeof bootstrap === 'undefined') {
-            console.warn('⚠️ Bootstrap not loaded, using fallback');
-            
-            // Simple tooltip fallback
-            document.addEventListener('DOMContentLoaded', function() {
-                const tooltipElements = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-                tooltipElements.forEach(function(element) {
-                    element.addEventListener('mouseenter', function() {
-                        const title = this.getAttribute('title');
-                        if (title) {
-                            // Create simple tooltip
-                            const tooltip = document.createElement('div');
-                            tooltip.className = 'simple-tooltip';
-                            tooltip.textContent = title;
-                            tooltip.style.cssText = 'position: absolute; background: black; color: white; padding: 5px; border-radius: 3px; z-index: 1000; font-size: 12px;';
-                            document.body.appendChild(tooltip);
-                            
-                            const rect = this.getBoundingClientRect();
-                            tooltip.style.left = rect.left + 'px';
-                            tooltip.style.top = (rect.top - tooltip.offsetHeight - 5) + 'px';
-                            
-                            this._tooltip = tooltip;
-                        }
-                    });
-                    
-                    element.addEventListener('mouseleave', function() {
-                        if (this._tooltip) {
-                            document.body.removeChild(this._tooltip);
-                            this._tooltip = null;
-                        }
-                    });
-                });
-            });
-        }
-    </script>
     
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -66,7 +189,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v={{ range(100000000000, 999999999999) | random }}">
 </head>
 <body>
     <!-- Navigation -->
@@ -86,60 +209,219 @@
         </div>
     </nav>
 
+    <!-- Global Alert Container -->
+    <div id="global-alert"></div>
+    
+    <!-- Sync Banner -->
+    <div id="sync-banner" class="alert alert-info text-center mb-3" style="display: none;">
+        Laatste update: --:-- (-- min geleden)
+    </div>
+
     <!-- Main Content -->
     <div class="container-fluid mt-4">
-        <!-- Top Row - Critical Metrics -->
+        <!-- System Status - Bovenaan -->
         <div class="row mb-4">
-            <div class="col-md-3 mb-3">
-                <div class="card bg-primary text-white h-100">
-                    <div class="card-body d-flex flex-column">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">💰 Portfolio Waarde</h6>
-                            <small class="opacity-75">Totaal</small>
+            <div class="col-12">
+                <section class="panel" data-panel-id="system-status" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-system-status">
+                        <div class="panel-title">🖥️ Systeem Status</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="🖥️ Systeem Status:&#10;• Pi Verbinding: Status van Raspberry Pi connectie&#10;• Laatste Sync: Wanneer data voor het laatst gesynchroniseerd werd&#10;• Data Bestanden: Aantal beschikbare data bestanden&#10;• Auto Vernieuwen: Dashboard refresh status">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
                         </div>
-                        <h3 class="mb-0" id="portfolio-value">€1.000,00</h3>
-                        <small class="opacity-75 mt-auto">Startkapitaal: €1.000</small>
+                    </header>
+                    <div id="panel-system-status" class="panel-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <strong>Pi Verbinding:</strong>
+                                <span id="pi-status" class="badge bg-secondary">Onbekend</span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Laatste Sync:</strong>
+                                <span id="last-sync">Laden...</span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Data Bestanden:</strong>
+                                <span id="data-files">0</span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Auto Vernieuwen:</strong>
+                                <span id="auto-refresh" class="badge bg-success">AAN</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+        
+        
+        
+        <!-- Global Controls -->
+        <div class="d-flex gap-2 mb-3">
+            <button id="expand-all" class="btn btn-sm btn-outline-primary">
+                <i class="fas fa-expand-arrows-alt"></i> Alles Uitklappen
+            </button>
+            <button id="collapse-all" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-compress-arrows-alt"></i> Alles Inklappen
+            </button>
+        </div>
+        <!-- Top Row - Critical Metrics -->
+        <section class="panel" data-panel-id="critical-metrics" aria-expanded="true">
+            <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-critical-metrics">
+                <div class="panel-title">🎯 Kritieke Metrics</div>
+                <div class="panel-actions">
+                    <button class="info-btn" aria-label="Info" data-tooltip="Overzicht van de belangrijkste trading metrics: portfolio waarde, dagelijkse P&L, open posities en risico score">i</button>
+                    <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+            </header>
+            <div id="panel-critical-metrics" class="panel-body">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <div class="kpi ok" id="kpi-portfolio">
+                            <div class="label">💰 Portfolio Waarde</div>
+                            <div class="value" id="portfolio-value">€1.000,00</div>
+                            <small class="text-muted">Startkapitaal: €1.000</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="kpi ok" id="kpi-daily-pnl">
+                            <div class="label">📈 Dagelijkse P&L</div>
+                            <div class="value" id="daily-pnl">€0,00</div>
+                            <small class="text-muted">Geen trades vandaag</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="kpi ok" id="kpi-positions">
+                            <div class="label">📊 Open Posities</div>
+                            <div class="value" id="open-positions">0</div>
+                            <small class="text-muted">Geen actieve trades</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="kpi ok" id="kpi-risk">
+                            <div class="label">⚠️ Risico Score</div>
+                            <div class="value" id="risk-score">3.5</div>
+                            <small class="text-muted">Gemiddeld risico</small>
+                        </div>
                     </div>
                 </div>
             </div>
-            
-            <div class="col-md-3 mb-3">
-                <div class="card bg-success text-white h-100">
-                    <div class="card-body d-flex flex-column">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">📈 Dagelijkse P&L</h6>
-                            <small class="opacity-75">Vandaag</small>
+        </section>
+
+        <!-- Bot Activity & Decision Making - Direct onder gekleurde blokken -->
+        <div class="row mb-4">
+            <!-- Bot Activity Timeline -->
+            <div class="col-lg-8">
+                <section class="panel" data-panel-id="bot-activity" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-bot-activity">
+                        <div class="panel-title">🤖 Bot Activiteit & Beslissingen</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="🤖 Bot Activiteit & Beslissingen:&#10;• Uptime: Hoe lang bot actief is&#10;• Trading Beslissingen: Elke 12 uur&#10;• Volgende Trading: Tijd volgende beslissing&#10;• Activity Timeline: Recente bot acties&#10;• Beslissingen: Trading beslissingen met parameters&#10;• Status badges: Geel=Geen actie, Groen=Succes">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
                         </div>
-                        <h3 class="mb-0" id="daily-pnl">€0,00</h3>
-                        <small class="opacity-75 mt-auto">Geen trades vandaag</small>
+                    </header>
+                    <div id="panel-bot-activity" class="panel-body">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h4 id="bot-uptime" class="text-info">0h 0m</h4>
+                                    <small>Bot Uptime</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h4 id="decision-frequency" class="text-primary">0/min</h4>
+                                    <small>Trading Beslissingen</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h4 id="next-check" class="text-warning">--:--</h4>
+                                    <small>Volgende Trading</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover" id="bot-activity-table">
+                                <thead>
+                                    <tr>
+                                        <th>Datum & Tijd</th>
+                                        <th>Actie</th>
+                                        <th>Beslissing</th>
+                                        <th>Reden</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="bot-activity-tbody">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">Bot activiteit laden...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
+                </section>
             </div>
             
-            <div class="col-md-3 mb-3">
-                <div class="card bg-info text-white h-100">
-                    <div class="card-body d-flex flex-column">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">🔄 Open Posities</h6>
-                            <small class="opacity-75">Actief</small>
+            <!-- Bot Performance Metrics -->
+            <div class="col-lg-4">
+                <section class="panel" data-panel-id="bot-performance" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-bot-performance">
+                        <div class="panel-title">📊 Bot Prestaties</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="📊 Bot Prestaties:&#10;• Marktanalyse: ML model performance&#10;• Risico Beoordeling: Risk assessment score&#10;• Data Sync Snelheid: Hoe snel data van Pi naar Mac wordt gesynchroniseerd (SCP/SSH)&#10;• Succespercentage: Trading success rate">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
                         </div>
-                        <h3 class="mb-0" id="open-positions">0</h3>
-                        <small class="opacity-75 mt-auto">Geen actieve trades</small>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-3 mb-3">
-                <div class="card bg-danger text-white h-100">
-                    <div class="card-body d-flex flex-column">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">⚠️ Risico Score</h6>
-                            <small class="opacity-75">Niveau</small>
+                    </header>
+                    <div id="panel-bot-performance" class="panel-body">
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between">
+                                <span id="market-analysis-label">Marktanalyse</span>
+                                <span id="market-analysis-score" class="badge bg-secondary">0%</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div id="market-analysis-bar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="market-analysis-details" class="text-muted">Loading...</small>
                         </div>
-                        <h3 class="mb-0" id="risk-score">3.5</h3>
-                        <small class="opacity-75 mt-auto">Gemiddeld risico</small>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between">
+                                <span id="risk-assessment-label">Risico Beoordeling</span>
+                                <span id="risk-assessment-score" class="badge bg-secondary">0%</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div id="risk-assessment-bar" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="risk-assessment-details" class="text-muted">Loading...</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between">
+                                <span id="execution-speed-label">Data Sync Snelheid</span>
+                                <span id="execution-speed-score" class="badge bg-secondary">0%</span>
+                            </div>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div id="execution-speed-bar" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="execution-speed-details" class="text-muted">Loading...</small>
+                        </div>
+                        
+                        <hr>
+                        
+                        <div class="row text-center">
+                            <div class="col-6">
+                                <h5 id="success-rate" class="text-success">0%</h5>
+                                <small>Succespercentage</small>
+                            </div>
+                            <div class="col-6">
+                                <h5 id="avg-decision-time" class="text-info">0ms</h5>
+                                <small>Gem. Beslissingstijd</small>
+                            </div>
+                        </div>
                     </div>
-                </div>
+                </section>
             </div>
         </div>
 
@@ -281,61 +563,59 @@
         <div class="row mb-4">
             <!-- Equity Curve -->
             <div class="col-lg-8">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="fas fa-chart-line"></i> Vermogenscurve</h5>
-                        <div>
-                            <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="tooltip" data-bs-placement="left" title="📈 Vermogenscurve:&#10;• Toont portfoliowaarde over tijd&#10;• Startkapitaal: €1.000&#10;• Demo mode: Geen echte trades&#10;• Updates elke 5 minuten">
-                                <i class="fas fa-info-circle fa-lg text-primary"></i>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#equity-curve-collapse" aria-expanded="true">
-                                <i class="fas fa-chevron-down fa-lg text-primary"></i>
-                            </button>
-                        </div>
+                <section class="panel" data-panel-id="equity-curve" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-equity-curve">
+                        <div class="panel-title">📈 Vermogenscurve</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="📈 Vermogenscurve:&#10;• Toont portfoliowaarde over tijd&#10;• Startkapitaal: €1.000&#10;• Demo mode: Geen echte trades&#10;• Updates elke 5 minuten">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
                     </div>
-                    <div class="collapse show" id="equity-curve-collapse">
-                        <div class="card-body">
-                            <canvas id="equityChart" height="100"></canvas>
-                        </div>
+                    </header>
+                    <div id="panel-equity-curve" class="panel-body">
+                        <canvas id="equityChart" height="100"></canvas>
                     </div>
+                </section>
+            </div>
+
+        <!-- ========================================
+             PORTFOLIO & TRADING SECTIE
+             ======================================== -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <hr class="my-4">
+                <h4 class="text-center text-muted mb-4">💰 Portfolio & Trading Performance</h4>
                 </div>
             </div>
             
             <!-- Portfolio Overview -->
             <div class="col-lg-4">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="fas fa-wallet"></i> Portfolio Overzicht</h5>
-                        <div>
-                            <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="tooltip" data-bs-placement="left" title="📊 Portfolio Overzicht:&#10;• Totaal Saldo: Huidige portfoliowaarde&#10;• Beschikbaar Saldo: Vrij beschikbaar voor trading&#10;• Open Posities: Aantal actieve trades&#10;• Totaal P&L: Totale winst/verlies sinds start">
-                                <i class="fas fa-info-circle fa-lg text-primary"></i>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#portfolio-overview-collapse" aria-expanded="true">
-                                <i class="fas fa-chevron-down fa-lg text-primary"></i>
-                            </button>
+                <section class="panel" data-panel-id="portfolio-overview" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-portfolio-overview">
+                        <div class="panel-title">💰 Portfolio Overzicht</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="📊 Portfolio Overzicht:&#10;• Totaal Saldo: Huidige portfoliowaarde&#10;• Beschikbaar Saldo: Vrij beschikbaar voor trading&#10;• Open Posities: Aantal actieve trades&#10;• Totaal P&L: Totale winst/verlies sinds start">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
                         </div>
-                    </div>
-                    <div class="collapse show" id="portfolio-overview-collapse">
-                        <div class="card-body">
+                    </header>
+                    <div id="panel-portfolio-overview" class="panel-body">
                             <div class="mb-3">
                                 <strong>Totaal Saldo:</strong>
                                 <span id="total-balance" class="float-end">Laden...</span>
-                            </div>
-                            <div class="mb-3">
+                    </div>
+                        <div class="mb-3">
                                 <strong>Beschikbaar Saldo:</strong>
                                 <span id="available-balance" class="float-end">Laden...</span>
-                            </div>
-                            <div class="mb-3">
+                        </div>
+                        <div class="mb-3">
                                 <strong>Open Posities:</strong>
                                 <span id="open-positions-detail" class="float-end">Laden...</span>
-                            </div>
-                            <div class="mb-3">
+                        </div>
+                        <div class="mb-3">
                                 <strong>Totaal P&L:</strong>
                                 <span id="portfolio-pnl" class="float-end">Laden...</span>
                             </div>
-                        </div>
                     </div>
-                </div>
+                </section>
             </div>
         </div>
 
@@ -343,14 +623,15 @@
         <div class="row mb-4">
             <!-- Portfolio Holdings -->
             <div class="col-lg-8">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="fas fa-coins"></i> Portfolio Bezittingen</h5>
-                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="Huidige cryptocurrency bezittingen en hun waarde">
-                            <i class="fas fa-info-circle fa-lg text-primary"></i>
-                        </button>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="portfolio-holdings" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-portfolio-holdings">
+                        <div class="panel-title">🪙 Portfolio Bezittingen</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="Huidige cryptocurrency bezittingen en hun waarde">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-portfolio-holdings" class="panel-body">
                         <div class="table-responsive">
                             <table class="table table-hover" id="portfolio-table">
                                 <thead>
@@ -371,23 +652,24 @@
                             </table>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
             
             <!-- Portfolio Allocation -->
             <div class="col-lg-4">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="fas fa-chart-pie"></i> Portfolio Verdeling</h5>
-                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="🥧 Portfolio Verdeling:&#10;• Toont verdeling van bezittingen&#10;• Cirkeldiagram met percentages&#10;• Huidige status: Geen bezittingen&#10;• Updates bij nieuwe trades">
-                            <i class="fas fa-info-circle fa-lg text-primary"></i>
-                        </button>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="portfolio-allocation" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-portfolio-allocation">
+                        <div class="panel-title">🥧 Portfolio Verdeling</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="🥧 Portfolio Verdeling:&#10;• Toont verdeling van bezittingen&#10;• Cirkeldiagram met percentages&#10;• Huidige status: Geen bezittingen&#10;• Updates bij nieuwe trades">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-portfolio-allocation" class="panel-body">
                         <canvas id="portfolioChart"></canvas>
                         <div id="portfolio-legend" class="mt-3"></div>
-                    </div>
                 </div>
+                </section>
             </div>
         </div>
 
@@ -395,26 +677,31 @@
         <div class="row mb-4">
             <!-- Win/Loss Breakdown -->
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="fas fa-chart-pie"></i> Win/Verlies Verdeling</h5>
-                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="📊 Win/Verlies Verdeling:&#10;• Toont aantal winnende vs verliezende trades&#10;• Groen: Winnende trades&#10;• Rood: Verliezende trades&#10;• Huidige status: Nog geen trades">
-                            <i class="fas fa-info-circle fa-lg text-primary"></i>
-                        </button>
+                <section class="panel" data-panel-id="win-loss-breakdown" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-win-loss-breakdown">
+                        <div class="panel-title">📊 Win/Verlies Verdeling</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="📊 Win/Verlies Verdeling:&#10;• Toont aantal winnende vs verliezende trades&#10;• Groen: Winnende trades&#10;• Rood: Verliezende trades&#10;• Huidige status: Nog geen trades">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
                     </div>
-                    <div class="card-body">
+                    </header>
+                    <div id="panel-win-loss-breakdown" class="panel-body">
                         <canvas id="winLossChart"></canvas>
                     </div>
-                </div>
+                </section>
             </div>
             
             <!-- Trading Stats -->
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-chart-bar"></i> Trading Statistieken</h5>
+                <section class="panel" data-panel-id="trading-stats" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-trading-stats">
+                        <div class="panel-title">📈 Trading Statistieken</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="📈 Trading Statistieken:&#10;• Winnende vs verliezende trades&#10;• Gemiddelde win/verlies per trade&#10;• Winst factor (ratio)&#10;• Huidige status: Nog geen trades">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
                     </div>
-                    <div class="card-body">
+                    </header>
+                    <div id="panel-trading-stats" class="panel-body">
                         <div class="row">
                             <div class="col-6">
                                 <div class="text-center">
@@ -450,131 +737,32 @@
                             <small>Winst Factor</small>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
         </div>
 
-        <!-- Bot Activity & Decision Making -->
+        <!-- ========================================
+             ML & MARKET INTELLIGENCE SECTIE
+             ======================================== -->
         <div class="row mb-4">
-            <!-- Bot Activity Timeline -->
-            <div class="col-lg-8">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="fas fa-brain"></i> Bot Activiteit & Besluitvorming</h5>
-                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" data-bs-placement="left" title="🤖 Bot Activiteit:&#10;• Uptime: Hoe lang bot actief is&#10;• Trading Beslissingen: Elke 12 uur&#10;• Volgende Trading: Tijd volgende beslissing&#10;• Activity Timeline: Recente bot acties&#10;• Status badges: Geel=Geen actie, Groen=Succes">
-                            <i class="fas fa-info-circle fa-lg text-primary"></i>
-                        </button>
-                    </div>
-                    <div class="card-body">
-                        <div class="row mb-3">
-                            <div class="col-md-4">
-                                <div class="text-center">
-                                    <h4 id="bot-uptime" class="text-info">0h 0m</h4>
-                                    <small>Bot Uptime</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="text-center">
-                                    <h4 id="decision-frequency" class="text-primary">0/min</h4>
-                                    <small>Trading Beslissingen</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="text-center">
-                                    <h4 id="next-check" class="text-warning">--:--</h4>
-                                    <small>Volgende Trading</small>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover" id="bot-activity-table">
-                                <thead>
-                                    <tr>
-                                        <th>Datum & Tijd</th>
-                                        <th>Actie</th>
-                                        <th>Beslissing</th>
-                                        <th>Reden</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="bot-activity-tbody">
-                                    <tr>
-                                        <td colspan="5" class="text-center text-muted">Bot activiteit laden...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Bot Performance Metrics -->
-            <div class="col-lg-4">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-chart-line"></i> Bot Prestaties</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <div class="d-flex justify-content-between">
-                                <span id="market-analysis-label">Marktanalyse</span>
-                                <span id="market-analysis-score" class="badge bg-secondary">0%</span>
-                            </div>
-                            <div class="progress mt-1" style="height: 6px;">
-                                <div id="market-analysis-bar" class="progress-bar" role="progressbar" style="width: 0%"></div>
-                            </div>
-                            <small id="market-analysis-details" class="text-muted">Loading...</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <div class="d-flex justify-content-between">
-                                <span id="risk-assessment-label">Risico Beoordeling</span>
-                                <span id="risk-assessment-score" class="badge bg-secondary">0%</span>
-                            </div>
-                            <div class="progress mt-1" style="height: 6px;">
-                                <div id="risk-assessment-bar" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
-                            </div>
-                            <small id="risk-assessment-details" class="text-muted">Loading...</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <div class="d-flex justify-content-between">
-                                <span id="execution-speed-label">Data Sync Snelheid</span>
-                                <span id="execution-speed-score" class="badge bg-secondary">0%</span>
-                            </div>
-                            <div class="progress mt-1" style="height: 6px;">
-                                <div id="execution-speed-bar" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
-                            </div>
-                            <small id="execution-speed-details" class="text-muted">Loading...</small>
-                        </div>
-                        
-                        <hr>
-                        
-                        <div class="row text-center">
-                            <div class="col-6">
-                                <h5 id="success-rate" class="text-success">0%</h5>
-                                <small>Succespercentage</small>
-                            </div>
-                            <div class="col-6">
-                                <h5 id="avg-decision-time" class="text-info">0ms</h5>
-                                <small>Gem. Beslissingstijd</small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="col-12">
+                <hr class="my-4">
+                <h4 class="text-center text-muted mb-4">🧠 ML & Market Intelligence</h4>
             </div>
         </div>
-
 
         <!-- ML & AI Insights -->
         <div class="row mb-4">
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-brain"></i> ML Model Prestaties</h5>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="ml-model-performance" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-ml-model-performance">
+                        <div class="panel-title">🧠 ML Model Prestaties</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="🧠 ML Model Prestaties:&#10;• Voorspellingen: Aantal ML predictions vandaag&#10;• Model Accuraatheid: Cross-validation score&#10;• Feature Belangrijkheid: Top 5 belangrijkste features&#10;• Confidence Score: Gemiddelde model confidence">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-ml-model-performance" class="panel-body">
                         <div class="row">
                             <div class="col-6 mb-3">
                                 <div class="text-center">
@@ -615,15 +803,19 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
             
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-signal"></i> Signaal Kwaliteit</h5>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="signal-quality" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-signal-quality">
+                        <div class="panel-title">📡 Signaal Kwaliteit</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="📡 Signaal Kwaliteit:&#10;• Signaal Sterkte: Huidige trading signal strength&#10;• Regime Status: Marktcondities (trending/sideways)&#10;• Universe Selectie: Geselecteerde coins voor trading&#10;• Risk Score: Huidige risico niveau">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-signal-quality" class="panel-body">
                         <div class="row">
                             <div class="col-6 mb-3">
                                 <div class="text-center">
@@ -656,21 +848,25 @@
                             <div class="col-6">
                                 <small class="text-muted">Trend Richting:</small><br>
                                 <strong id="trend-direction">Sideways</strong>
-                            </div>
                         </div>
                     </div>
                 </div>
+                </section>
             </div>
         </div>
 
         <!-- Market Intelligence -->
         <div class="row mb-4">
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-chart-area"></i> Markt Overzicht</h5>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="market-overview" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-market-overview">
+                        <div class="panel-title">📈 Markt Overzicht</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="📈 Markt Overzicht:&#10;• Volatiliteit Index: Markt volatiliteit score&#10;• Volume Analyse: Trading volume trends&#10;• Top Movers: Beste/slechtste performers&#10;• Markt sentiment en trends">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-market-overview" class="panel-body">
                         <div class="row mb-3">
                             <div class="col-6">
                                 <div class="text-center">
@@ -704,15 +900,19 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
             
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-shield-alt"></i> Risico Management</h5>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="risk-management" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-risk-management">
+                        <div class="panel-title">🛡️ Risico Management</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="🛡️ Risico Management:&#10;• Risico Afwijzingen: Aantal afgewezen trades&#10;• Dagelijks Verlies: Huidige dagelijkse verlies&#10;• Positie Groottes: Max/avg/min position sizes&#10;• Correlation Matrix: Positie correlaties">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-risk-management" class="panel-body">
                         <div class="row mb-3">
                             <div class="col-6">
                                 <div class="text-center">
@@ -759,18 +959,22 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
         </div>
 
         <!-- Real-time Alerts -->
         <div class="row mb-4">
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-exclamation-triangle"></i> Kritieke Waarschuwingen</h5>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="critical-alerts" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-critical-alerts">
+                        <div class="panel-title">⚠️ Kritieke Waarschuwingen</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="⚠️ Kritieke Waarschuwingen:&#10;• High Latency: Performance issues&#10;• API Failures: Connectivity problems&#10;• Risk Breaches: Risk limit violations&#10;• Model Drift: ML model degradation">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-critical-alerts" class="panel-body">
                         <div id="critical-alerts">
                             <div class="alert alert-info">
                                 <div class="d-flex justify-content-between">
@@ -780,15 +984,19 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
             
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-bullseye"></i> Trading Kansen</h5>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="trading-opportunities" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-trading-opportunities">
+                        <div class="panel-title">🎯 Trading Kansen</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="🎯 Trading Kansen:&#10;• New Signals: Nieuwe trading signalen&#10;• Position Updates: Status wijzigingen&#10;• Market Events: Belangrijke markt events&#10;• System Events: Bot status changes">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-trading-opportunities" class="panel-body">
                         <div id="trading-opportunities">
                             <div class="alert alert-warning">
                                 <div class="d-flex justify-content-between">
@@ -796,10 +1004,10 @@
                                     <small class="text-muted">19:02</small>
                                 </div>
                                 <small class="text-muted">Confidence: 75% - Status: Monitoring</small>
-                            </div>
                         </div>
                     </div>
                 </div>
+                </section>
             </div>
         </div>
 
@@ -807,11 +1015,15 @@
         <div class="row mb-4">
             <!-- Decision Thresholds -->
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-sliders-h"></i> Beslisdrempels & Parameters</h5>
-                    </div>
-                    <div class="card-body">
+                <section class="panel" data-panel-id="decision-thresholds" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-decision-thresholds">
+                        <div class="panel-title">⚙️ Beslisdrempels & Parameters</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="⚙️ Beslisdrempels & Parameters:&#10;• Prijsverandering: Minimum price change voor signal&#10;• Volume: Minimum volume threshold&#10;• RSI: Oversold/overbought levels&#10;• Risk: Maximum risk per trade">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                        </div>
+                    </header>
+                    <div id="panel-decision-thresholds" class="panel-body">
                         <div class="row" id="decision-thresholds">
                             <div class="col-6 mb-2">
                                 <small class="text-muted">Prijsverandering:</small><br>
@@ -847,108 +1059,18 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
             
-            <!-- Recent Decisions -->
-            <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-history"></i> Recente Besluiten</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm" id="recent-decisions-table">
-                                <thead>
-                                    <tr>
-                                        <th>Tijd</th>
-                                        <th>Actie</th>
-                                        <th>Beslissing</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="recent-decisions-tbody">
-                                    <tr>
-                                        <td colspan="4" class="text-center text-muted">Loading recente besluiten...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
 
-        <!-- System Status -->
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-server"></i> Systeem Status</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-3">
-                                <strong>Pi Verbinding:</strong>
-                                <span id="pi-status" class="badge bg-secondary">Onbekend</span>
-                            </div>
-                            <div class="col-md-3">
-                                <strong>Laatste Sync:</strong>
-                                <span id="last-sync">Laden...</span>
-                            </div>
-                            <div class="col-md-3">
-                                <strong>Data Bestanden:</strong>
-                                <span id="data-files">0</span>
-                            </div>
-                            <div class="col-md-3">
-                                <strong>Auto Vernieuwen:</strong>
-                                <span id="auto-refresh" class="badge bg-success">AAN</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- Custom JavaScript -->
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v={{ range(10000, 99999) | random }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v={{ range(100000000000, 999999999999) | random }}"></script>
     
-    <!-- Dashboard Functionality -->
-    <script>
-        // Add collapse functionality using Bootstrap events
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('🔧 Initializing dashboard functionality...');
-            
-            const collapseElements = document.querySelectorAll('[data-bs-toggle="collapse"]');
-            console.log('Found collapse elements:', collapseElements.length);
-            
-            collapseElements.forEach(function(element) {
-                const targetId = element.getAttribute('data-bs-target');
-                const targetElement = document.querySelector(targetId);
-                const icon = element.querySelector('i');
-                
-                if (targetElement && icon) {
-                    // Listen for Bootstrap collapse events
-                    targetElement.addEventListener('shown.bs.collapse', function() {
-                        icon.classList.remove('fa-chevron-down');
-                        icon.classList.add('fa-chevron-up');
-                        console.log('✅ Expanded:', targetId);
-                    });
-                    
-                    targetElement.addEventListener('hidden.bs.collapse', function() {
-                        icon.classList.remove('fa-chevron-up');
-                        icon.classList.add('fa-chevron-down');
-                        console.log('✅ Collapsed:', targetId);
-                    });
-                }
-            });
-            
-            console.log('✅ Dashboard functionality initialized');
-        });
-    </script>
 </body>
 </html>
