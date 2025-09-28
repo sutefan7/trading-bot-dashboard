@@ -46,7 +46,7 @@ security_logger.setLevel(logging.INFO)
 
 # Flask app
 app = Flask(__name__)
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv('DASHBOARD_ALLOWED_ORIGINS', 'http://localhost:5001,http://127.0.0.1:5001').split(',') if o.strip()]
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv('DASHBOARD_ALLOWED_ORIGINS', 'http://localhost:5001,http://127.0.0.1:5001,https://localhost:5001,https://127.0.0.1:5001').split(',') if o.strip()]
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "supports_credentials": True}})
 
 # Authentication
@@ -1828,6 +1828,49 @@ def api_export_json():
         }), 500
 
 
+# ===== LOGS API ENDPOINTS =====
+@app.route('/api/logs/list')
+@auth.login_required
+@limiter.limit("30 per minute")
+def api_logs_list():
+    try:
+        logs_dir = Path('logs')
+        logs_dir.mkdir(exist_ok=True)
+        files = []
+        for p in logs_dir.iterdir():
+            if p.is_file() and (p.suffix in ['.log', '.jsonl']):
+                stat = p.stat()
+                files.append({
+                    'name': p.name,
+                    'size': stat.st_size,
+                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+        files.sort(key=lambda x: x['modified'], reverse=True)
+        return jsonify({'files': files, 'count': len(files)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/download')
+@auth.login_required
+@limiter.limit("10 per minute")
+def api_logs_download():
+    try:
+        filename = request.args.get('file', '')
+        if not filename:
+            return jsonify({'error': 'file parameter is required'}), 400
+        safe_name = SecurityValidator.sanitize_filename(filename)
+        logs_dir = Path('logs')
+        file_path = (logs_dir / safe_name).resolve()
+        # Ensure file is inside logs directory
+        if logs_dir.resolve() not in file_path.parents:
+            return jsonify({'error': 'Invalid file path'}), 400
+        if not file_path.exists() or not file_path.is_file():
+            return jsonify({'error': 'File not found'}), 404
+        return send_file(str(file_path), as_attachment=True, download_name=safe_name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Trading Bot Dashboard Web Server')
@@ -1866,26 +1909,18 @@ if __name__ == '__main__':
         key_file = Path(__file__).parent / SSL_KEY_FILE
         
         if not cert_file.exists() or not key_file.exists():
-            logger.error("❌ SSL certificate files not found!")
-            logger.error(f"   Certificate: {cert_file}")
-            logger.error(f"   Private Key: {key_file}")
-            logger.error("   Run ./ssl_setup.sh to generate SSL certificates")
-            exit(1)
-        
-        logger.info("🚀 Starting Trading Bot Dashboard Web Server (HTTPS)")
-        logger.info("📊 Dashboard available at: https://localhost:5001")
-        logger.info("🔐 SSL/TLS encryption enabled")
-        
-        # Create SSL context
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(cert_file, key_file)
-        
-        # Run the app with HTTPS
-        app.run(host=args.host, port=args.port, debug=DEBUG_MODE, ssl_context=context, threaded=True)
-    else:
-        logger.info("🚀 Starting Trading Bot Dashboard Web Server (HTTP)")
-        logger.info("📊 Dashboard available at: http://localhost:5001")
-        logger.info("⚠️  HTTP mode - consider using --https for production")
-        
-        # Run the app with HTTP
-        app.run(host=args.host, port=args.port, debug=DEBUG_MODE, threaded=True)
+            logger.error("❌ SSL certificate files not found! Falling back to HTTP.")
+            HTTPS_ENABLED = False
+        else:
+            logger.info("🚀 Starting Trading Bot Dashboard Web Server (HTTPS)")
+            logger.info("📊 Dashboard available at: https://localhost:5001")
+            logger.info("🔐 SSL/TLS encryption enabled")
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(cert_file, key_file)
+            app.run(host=args.host, port=args.port, debug=DEBUG_MODE, ssl_context=context, threaded=True)
+            exit(0)
+    # HTTP fallback
+    logger.info("🚀 Starting Trading Bot Dashboard Web Server (HTTP)")
+    logger.info("📊 Dashboard available at: http://localhost:5001")
+    logger.info("⚠️  HTTP mode - consider using --https for production")
+    app.run(host=args.host, port=args.port, debug=DEBUG_MODE, threaded=True)

@@ -222,3 +222,47 @@ canvas {
 .border-warning {
     border-left: 4px solid #ffc107 !important;
 }
+
+/* Skeleton loading */
+.skeleton {
+    position: relative;
+    background: #e9ecef;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.skeleton::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -150px;
+    height: 100%;
+    width: 150px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+    animation: shimmer 1.2s infinite;
+}
+@keyframes shimmer {
+    0% { left: -150px; }
+    100% { left: 100%; }
+}
+
+/* Navbar badges */
+.navbar .badge {
+    font-size: 0.75rem;
+    vertical-align: middle;
+}
+
+/* Sticky table header */
+.table-sticky thead th {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 1;
+}
+
+/* Sortable columns */
+.th-sortable { cursor: pointer; }
+.th-sortable .sort-indicator { opacity: 0.5; margin-left: 6px; }
+.th-sortable.active .sort-indicator { opacity: 1; }
+
+/* Panel spacing */
+.panel + .panel { margin-top: 12px; }

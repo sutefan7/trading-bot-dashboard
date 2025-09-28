@@ -193,8 +193,99 @@ const ui = {
 let autoRefreshInterval = null;
 let dataFreshnessInterval = null;
 let isSyncing = false;
-const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_REFRESH_MIN = 5;
+let REFRESH_INTERVAL = (parseInt(localStorage.getItem('refresh_min') || DEFAULT_REFRESH_MIN, 10)) * 60 * 1000;
 const API_BASE = '/api';
+
+function applyDarkModePreference(){
+    const enabled = localStorage.getItem('dark_mode') === 'true';
+    document.documentElement.setAttribute('data-bs-theme', enabled ? 'dark' : 'light');
+    const chk = document.getElementById('setting-dark-mode');
+    if (chk) chk.checked = enabled;
+}
+
+function initSettings(){
+    // Initialize refresh input
+    const input = document.getElementById('setting-refresh-min');
+    if (input) input.value = parseInt(REFRESH_INTERVAL / 60000, 10);
+    applyDarkModePreference();
+    
+    // Save settings
+    const saveBtn = document.getElementById('btn-save-settings');
+    if (saveBtn) saveBtn.addEventListener('click', () => {
+        const input = document.getElementById('setting-refresh-min');
+        const minutes = Math.max(1, Math.min(60, parseInt(input?.value || DEFAULT_REFRESH_MIN, 10)));
+        localStorage.setItem('refresh_min', String(minutes));
+        REFRESH_INTERVAL = minutes * 60 * 1000;
+        
+        // Persist dark mode on save as well
+        const darkToggle = document.getElementById('setting-dark-mode');
+        const darkEnabled = !!darkToggle?.checked;
+        localStorage.setItem('dark_mode', darkEnabled ? 'true' : 'false');
+        applyDarkModePreference();
+        
+        startAutoRefresh();
+        showSuccess('Instellingen opgeslagen');
+        
+        // Close modal
+        const modalEl = document.getElementById('settingsModal');
+        if (modalEl && window.bootstrap?.Modal) {
+            const modal = window.bootstrap.Modal.getInstance(modalEl) || new window.bootstrap.Modal(modalEl);
+            modal.hide();
+        }
+    });
+    
+    // Dark mode toggle
+    const darkToggle = document.getElementById('setting-dark-mode');
+    if (darkToggle) darkToggle.addEventListener('change', (e) => {
+        localStorage.setItem('dark_mode', e.target.checked ? 'true' : 'false');
+        applyDarkModePreference();
+    });
+    
+    // Export buttons
+    const btnJson = document.getElementById('btn-export-json');
+    if (btnJson) btnJson.addEventListener('click', () => { window.open(API_BASE + '/export/json', '_blank'); });
+    const btnCsv = document.getElementById('btn-export-csv');
+    if (btnCsv) btnCsv.addEventListener('click', () => { window.open(API_BASE + '/export/csv', '_blank'); });
+
+    // Advanced: logs
+    const btnRefreshLogs = document.getElementById('btn-refresh-logs');
+    if (btnRefreshLogs) btnRefreshLogs.addEventListener('click', loadLogsList);
+    // Load logs when opening Advanced tab
+    document.getElementById('tab-advanced')?.addEventListener('shown.bs.tab', loadLogsList);
+
+    const btnHardRefresh = document.getElementById('btn-hard-refresh');
+    if (btnHardRefresh) btnHardRefresh.addEventListener('click', () => {
+        showSuccess('Panels verversen...');
+        loadAllData();
+    });
+}
+
+async function loadLogsList(){
+    try {
+        const res = await fetch(API_BASE + '/logs/list');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const tbody = document.querySelector('#logs-table tbody');
+        if (!tbody) return;
+        if (!data.files || data.files.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Geen logs gevonden</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.files.map(f => `
+            <tr>
+                <td class="text-truncate">${f.name}</td>
+                <td>${(f.size/1024).toFixed(1)} KB</td>
+                <td><small class="text-muted">${new Date(f.modified).toLocaleString('nl-NL')}</small></td>
+                <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="${API_BASE}/logs/download?file=${encodeURIComponent(f.name)}"><i class="fas fa-download"></i></a></td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Log list error:', e);
+        const tbody = document.querySelector('#logs-table tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-danger text-center">Fout bij ophalen logs</td></tr>';
+    }
+}
 
 // ============================================================================
 // GLOBAL INITIALIZATION
@@ -388,7 +479,11 @@ async function loadAllData() {
         state.lastSyncAt = new Date().toISOString();
         state.dataFreshnessMin = 0;
         
-        // Load data in parallel with error handling for each
+        // Show skeletons during load
+        document.getElementById('portfolio-value')?.classList.add('loading');
+        document.getElementById('portfolio-tbody')?.classList.add('loading');
+        document.getElementById('ml-models-tbody')?.classList.add('loading');
+        
         const promises = [
             fetchData('/trading-performance').catch(e => { console.error('Trading performance error:', e); return {error: 'Trading performance failed'}; }),
             fetchData('/portfolio').catch(e => { console.error('Portfolio error:', e); return {error: 'Portfolio failed'}; }),
@@ -412,7 +507,7 @@ async function loadAllData() {
         state.alerts = realTimeAlerts;
         state.mlModels = mlModelsData;
         
-        // Update UI with data (each function handles errors internally)
+        // Update UI with data
         ui.updateTradingPerformance(tradingData);
         ui.updatePortfolioOverview(portfolioData);
         ui.updatePortfolioDetails(portfolioDetails);
@@ -424,12 +519,24 @@ async function loadAllData() {
         ui.updateRealTimeAlerts(realTimeAlerts);
         ui.updateMLModels(mlModelsData);
         
+        // Update navbar alert count
+        try {
+            const count = (realTimeAlerts?.total_alerts ?? 0) + (realTimeAlerts?.active_opportunities ?? 0);
+            const badge = document.getElementById('navbar-alert-count');
+            if (badge) badge.textContent = String(count);
+        } catch {}
+        
         // Update sync timestamp
         state.lastSyncAt = new Date().toISOString();
         state.dataFreshnessMin = 0;
         
         // Update sync banner
         ui.renderSyncBanner();
+        
+        // End skeletons
+        document.getElementById('portfolio-value')?.classList.remove('loading');
+        document.getElementById('portfolio-tbody')?.classList.remove('loading');
+        document.getElementById('ml-models-tbody')?.classList.remove('loading');
         
         // Start data freshness timer
         startDataFreshnessTimer();
@@ -501,7 +608,6 @@ Object.assign(ui, {
         
     if (data.error) {
         console.warn('Portfolio data error:', data.error);
-            // Show error state instead of "Laden..."
             utils.safeUpdateElements({
                 'portfolio-value': '⚠️ Geen data',
                 'total-balance': '⚠️ Geen data',
@@ -514,15 +620,12 @@ Object.assign(ui, {
         return;
     }
     
-    // Check if this is demo mode
-    if (data.demo_mode) {
-        console.log('Portfolio in demo mode - showing start capital');
-    }
-    
-        // Update KPIs with color logic
+        // Demo badge
+        const demoBadge = document.getElementById('portfolio-demo-badge');
+        if (demoBadge) demoBadge.style.display = data.demo_mode ? 'inline-block' : 'none';
+        
         this.updateKPIs(data);
         
-        // Update other portfolio elements
         utils.safeUpdateElements({
             'total-balance': utils.formatCurrency(data.total_balance),
             'available-balance': utils.formatCurrency(data.available_balance),
@@ -940,15 +1043,9 @@ Object.assign(ui, {
         }
         
         try {
-            // Update alert count
             utils.safeUpdateElement('total-alerts', data.total_alerts || '0');
+            if (data.critical_alerts) this.updateCriticalAlertBanner(data.critical_alerts);
             
-            // Update top critical alert banner
-            if (data.critical_alerts) {
-                this.updateCriticalAlertBanner(data.critical_alerts);
-            }
-            
-            // Update critical alerts
             if (data.critical_alerts && domRefs.criticalAlerts) {
                 domRefs.criticalAlerts.innerHTML = data.critical_alerts.map(alert => `
                     <div class="alert alert-${this.getAlertClass(alert.severity)}">
@@ -960,7 +1057,6 @@ Object.assign(ui, {
                 `).join('');
             }
             
-            // Update trading opportunities
             if (data.trading_opportunities && domRefs.tradingOpportunities) {
                 domRefs.tradingOpportunities.innerHTML = data.trading_opportunities.map(opportunity => `
                     <div class="alert alert-warning">
@@ -972,8 +1068,6 @@ Object.assign(ui, {
                     </div>
                 `).join('');
             }
-            
-            console.log('Real-time alerts updated successfully');
         } catch (error) {
             console.error('Error updating real-time alerts:', error);
         }
@@ -1552,6 +1646,85 @@ window.showModelDetails = showModelDetails;
 window.updateMLModels = ui.updateMLModels;
 window.updateCriticalAlertBanner = ui.updateCriticalAlertBanner;
 
+function copyCmd(id){
+    try {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.select?.();
+        el.setSelectionRange?.(0, 99999);
+        navigator.clipboard?.writeText(el.value);
+        showSuccess('Commando gekopieerd');
+    } catch (e) {
+        console.error('Copy failed', e);
+    }
+}
+
 // ============================================================================
 // END OF MODULAR DASHBOARD.JS
 // ============================================================================
+
+// Table sorting (client-side)
+(function enableTableSorting(){
+    function sortTable(tbody, selector, compare) {
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const dataRows = rows.filter(r => r.querySelector('td'));
+        dataRows.sort(compare);
+        tbody.innerHTML = '';
+        dataRows.forEach(r => tbody.appendChild(r));
+    }
+    function getCellText(row, idx){ return (row.children[idx]?.textContent || '').trim(); }
+    function toNumber(text){ const n = parseFloat(text.replace(/[^0-9.-]/g,'')); return isNaN(n) ? 0 : n; }
+
+    document.addEventListener('click', (e) => {
+        const th = e.target.closest('.th-sortable');
+        if (!th) return;
+        const table = th.closest('table');
+        const tbody = table.querySelector('tbody');
+        const key = th.getAttribute('data-sort');
+        const ths = Array.from(table.querySelectorAll('thead th'));
+        const idx = ths.indexOf(th);
+        const desc = th.classList.toggle('active') && th.classList.toggle('desc');
+        ths.forEach(other => { if (other !== th) { other.classList.remove('active','desc'); }});
+        
+        let compare;
+        switch(key){
+            case 'symbol':
+            case 'coin':
+                compare = (a,b) => getCellText(desc?b:a, 0).localeCompare(getCellText(desc?a:b, 0));
+                break;
+            case 'qty':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 2)) - toNumber(getCellText(desc?a:b, 2));
+                break;
+            case 'pnl':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 4)) - toNumber(getCellText(desc?a:b, 4));
+                break;
+            case 'balance':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 5)) - toNumber(getCellText(desc?a:b, 5));
+                break;
+            case 'training':
+                compare = (a,b) => getCellText(desc?b:a, 3).localeCompare(getCellText(desc?a:b, 3));
+                break;
+            case 'accuracy':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 4)) - toNumber(getCellText(desc?a:b, 4));
+                break;
+            case 'auc':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 5)) - toNumber(getCellText(desc?a:b, 5));
+                break;
+            case 'winrate':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 6)) - toNumber(getCellText(desc?a:b, 6));
+                break;
+            case 'return':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 7)) - toNumber(getCellText(desc?a:b, 7));
+                break;
+            case 'confidence':
+                compare = (a,b) => toNumber(getCellText(desc?b:a, 9)) - toNumber(getCellText(desc?a:b, 9));
+                break;
+            case 'time':
+                compare = (a,b) => new Date(getCellText(desc?b:a, 0)) - new Date(getCellText(desc?a:b, 0));
+                break;
+            default:
+                compare = (a,b) => 0;
+        }
+        sortTable(tbody, key, compare);
+    });
+})();

@@ -199,10 +199,20 @@
             <span class="navbar-brand mb-0 h1">
                 <i class="fas fa-robot"></i> Trading Bot Dashboard
             </span>
-            <div class="d-flex">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-secondary" title="Alleen lokaal"><i class="fas fa-lock"></i> Lokaal</span>
+                <a href="#panel-critical-alerts" class="text-decoration-none" onclick="document.getElementById('panel-critical-alerts').scrollIntoView({behavior:'smooth'})">
+                    <span class="badge bg-danger" id="navbar-alert-count">0</span>
+                </a>
                 <span class="navbar-text me-3" id="last-update">
                     <i class="fas fa-clock"></i> Laatste Update: <span id="last-update-time">Laden...</span>
                 </span>
+                <button class="btn btn-outline-light btn-sm me-2" data-bs-toggle="modal" data-bs-target="#settingsModal">
+                    <i class="fas fa-sliders-h"></i>
+                </button>
+                <button class="btn btn-outline-warning btn-sm me-2" data-bs-toggle="modal" data-bs-target="#restartModal" title="Herstart server">
+                    <i class="fas fa-rotate"></i>
+                </button>
                 <button class="btn btn-outline-light btn-sm" onclick="syncNow()">
                     <i class="fas fa-sync-alt"></i> Nu Synchroniseren
                 </button>
@@ -292,21 +302,21 @@
                     <div class="col-md-3 mb-3">
                         <div class="kpi ok" id="kpi-portfolio">
                             <div class="label">💰 Portfolio Waarde</div>
-                            <div class="value" id="portfolio-value">€1.000,00</div>
-                            <small class="text-muted">Startkapitaal: €1.000</small>
+                            <div class="value" id="portfolio-value"><span class="skeleton" style="display:inline-block;width:120px;height:24px;"></span></div>
+                            <small class="text-muted">Startkapitaal: €1.000 <span id="portfolio-demo-badge" class="badge bg-info" style="display:none;">Demo</span></small>
                         </div>
                     </div>
                     <div class="col-md-3 mb-3">
                         <div class="kpi ok" id="kpi-daily-pnl">
                             <div class="label">📈 Dagelijkse P&L</div>
-                            <div class="value" id="daily-pnl">€0,00</div>
+                            <div class="value" id="daily-pnl"><span class="skeleton" style="display:inline-block;width:80px;height:24px;"></span></div>
                             <small class="text-muted">Geen trades vandaag</small>
                         </div>
                     </div>
                     <div class="col-md-3 mb-3">
                         <div class="kpi ok" id="kpi-positions">
                             <div class="label">📊 Open Posities</div>
-                            <div class="value" id="open-positions">0</div>
+                            <div class="value" id="open-positions"><span class="skeleton" style="display:inline-block;width:40px;height:24px;"></span></div>
                             <small class="text-muted">Geen actieve trades</small>
                         </div>
                     </div>
@@ -356,10 +366,10 @@
                         </div>
                         
                         <div class="table-responsive">
-                            <table class="table table-sm table-hover" id="bot-activity-table">
+                            <table class="table table-sm table-hover table-sticky" id="bot-activity-table">
                                 <thead>
                                     <tr>
-                                        <th>Datum & Tijd</th>
+                                        <th class="th-sortable" data-sort="time">Datum & Tijd <i class="fas fa-sort sort-indicator"></i></th>
                                         <th>Actie</th>
                                         <th>Beslissing</th>
                                         <th>Reden</th>
@@ -368,7 +378,9 @@
                                 </thead>
                                 <tbody id="bot-activity-tbody">
                                     <tr>
-                                        <td colspan="5" class="text-center text-muted">Bot activiteit laden...</td>
+                                        <td colspan="5" class="text-center text-muted">
+                                            <div class="skeleton" style="height:24px"></div>
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -648,20 +660,22 @@
                     </header>
                     <div id="panel-portfolio-holdings" class="panel-body">
                         <div class="table-responsive">
-                            <table class="table table-hover" id="portfolio-table">
+                            <table class="table table-hover table-sticky" id="portfolio-table">
                                 <thead>
                                     <tr>
-                                        <th>Symbool</th>
+                                        <th class="th-sortable" data-sort="symbol">Symbool <i class="fas fa-sort sort-indicator"></i></th>
                                         <th>Kant</th>
-                                        <th>Hoeveelheid</th>
+                                        <th class="th-sortable" data-sort="qty">Hoeveelheid <i class="fas fa-sort sort-indicator"></i></th>
                                         <th>Status</th>
-                                        <th>P&L</th>
-                                        <th>Saldo</th>
+                                        <th class="th-sortable" data-sort="pnl">P&L <i class="fas fa-sort sort-indicator"></i></th>
+                                        <th class="th-sortable" data-sort="balance">Saldo <i class="fas fa-sort sort-indicator"></i></th>
                                     </tr>
                                 </thead>
                                 <tbody id="portfolio-tbody">
                                     <tr>
-                                        <td colspan="6" class="text-center text-muted">Portfolio data laden...</td>
+                                        <td colspan="6" class="text-center text-muted">
+                                            <div class="skeleton" style="height:24px"></div>
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -816,24 +830,26 @@
 
                         <!-- Models Table -->
                         <div class="table-responsive">
-                            <table class="table table-hover" id="ml-models-table">
+                            <table class="table table-hover table-sticky" id="ml-models-table">
                                 <thead class="table-dark">
                                     <tr>
-                                        <th>Coin</th>
+                                        <th class="th-sortable" data-sort="coin">Coin <i class="fas fa-sort sort-indicator"></i></th>
                                         <th>Model</th>
                                         <th>Type</th>
-                                        <th>Training</th>
-                                        <th>Accuracy</th>
-                                        <th>AUC</th>
-                                        <th>Win Rate</th>
-                                        <th>Returns</th>
+                                        <th class="th-sortable" data-sort="training">Training <i class="fas fa-sort sort-indicator"></i></th>
+                                        <th class="th-sortable" data-sort="accuracy">Accuracy <i class="fas fa-sort sort-indicator"></i></th>
+                                        <th class="th-sortable" data-sort="auc">AUC <i class="fas fa-sort sort-indicator"></i></th>
+                                        <th class="th-sortable" data-sort="winrate">Win Rate <i class="fas fa-sort sort-indicator"></i></th>
+                                        <th class="th-sortable" data-sort="return">Returns <i class="fas fa-sort sort-indicator"></i></th>
                                         <th>Status</th>
-                                        <th>Confidence</th>
+                                        <th class="th-sortable" data-sort="confidence">Confidence <i class="fas fa-sort sort-indicator"></i></th>
                                     </tr>
                                 </thead>
                                 <tbody id="ml-models-tbody">
                                     <tr>
-                                        <td colspan="10" class="text-center text-muted">ML models laden...</td>
+                                        <td colspan="10" class="text-center text-muted">
+                                            <div class="skeleton" style="height:24px"></div>
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1172,6 +1188,112 @@
             
         </div>
 
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-slideout">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-sliders-h me-2"></i>Instellingen</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <ul class="nav nav-tabs" id="settingsTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="tab-general" data-bs-toggle="tab" data-bs-target="#tab-pane-general" type="button" role="tab">Algemeen</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="tab-advanced" data-bs-toggle="tab" data-bs-target="#tab-pane-advanced" type="button" role="tab">Geavanceerd</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content pt-3">
+                        <div class="tab-pane fade show active" id="tab-pane-general" role="tabpanel">
+                            <div class="mb-3">
+                                <label class="form-label">Auto-refresh interval</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="setting-refresh-min" min="1" max="60" value="5">
+                                    <span class="input-group-text">minuten</span>
+                                </div>
+                                <small class="text-muted">Hoe vaak de dashboard data automatisch ververst wordt.</small>
+                            </div>
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="setting-dark-mode">
+                                <label class="form-check-label" for="setting-dark-mode">Donkere modus</label>
+                            </div>
+                            <hr>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-outline-primary" id="btn-export-json"><i class="fas fa-file-code me-2"></i>Exporteer JSON</button>
+                                <button class="btn btn-outline-secondary" id="btn-export-csv"><i class="fas fa-file-csv me-2"></i>Exporteer CSV</button>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="tab-pane-advanced" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0">Logs</h6>
+                                <button class="btn btn-sm btn-outline-secondary" id="btn-refresh-logs"><i class="fas fa-rotate"></i></button>
+                            </div>
+                            <div class="table-responsive" style="max-height:240px;">
+                                <table class="table table-sm" id="logs-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Bestand</th>
+                                            <th>Grootte</th>
+                                            <th>Laatst gewijzigd</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td colspan="4" class="text-muted text-center">Nog geen data</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <hr>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-outline-danger" id="btn-hard-refresh"><i class="fas fa-broom me-2"></i>Harde refresh (alle panels)</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>
+                    <button type="button" class="btn btn-primary" id="btn-save-settings">Opslaan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Restart Help Modal -->
+    <div class="modal fade" id="restartModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-rotate me-2"></i>Server Herstarten</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted">Gebruik één van onderstaande commando's in je terminal:</p>
+                    <div class="mb-3">
+                        <label class="form-label">Auto-restart watcher (aanbevolen)</label>
+                        <div class="input-group">
+                            <input id="cmd-watch" type="text" class="form-control" readonly value="python3 dev_watch.py">
+                            <button class="btn btn-outline-secondary" type="button" onclick="copyCmd('cmd-watch')"><i class="fas fa-copy"></i></button>
+                        </div>
+                        <small class="text-muted">Herstart automatisch bij wijzigingen</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Handmatige start</label>
+                        <div class="input-group">
+                            <input id="cmd-start" type="text" class="form-control" readonly value="./start_dashboard.sh">
+                            <button class="btn btn-outline-secondary" type="button" onclick="copyCmd('cmd-start')"><i class="fas fa-copy"></i></button>
+                        </div>
+                        <small class="text-muted">Start server eenmalig (zonder auto-restart)</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Bootstrap JS -->

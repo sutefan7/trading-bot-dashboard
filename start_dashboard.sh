@@ -8,6 +8,7 @@ set -e
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 echo -e "${BLUE}🤖 Trading Bot Dashboard${NC}"
@@ -48,18 +49,43 @@ fi
 echo -e "${GREEN}✅ Dependencies ready${NC}"
 
 # Create necessary directories
-mkdir -p data logs
+mkdir -p data logs ssl
+
+# Detect HTTPS support
+CERT_FILE="ssl/dashboard.crt"
+KEY_FILE="ssl/dashboard.key"
+USE_HTTPS=false
+if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
+  USE_HTTPS=true
+fi
 
 echo -e "${YELLOW}🚀 Starting Trading Bot Dashboard...${NC}"
 echo ""
-echo -e "${GREEN}📊 Dashboard will be available at:${NC}"
-echo -e "${GREEN}   http://localhost:5001${NC}"
-echo ""
+if [ "$USE_HTTPS" = true ]; then
+  echo -e "${GREEN}📊 Dashboard will be available at:${NC}"
+  echo -e "${GREEN}   https://localhost:5001${NC}"
+  echo ""
+  echo -e "${YELLOW}ℹ️  HTTPS enabled (using ssl/dashboard.crt & ssl/dashboard.key)${NC}"
+  EXTRA_ARGS="--https"
+else
+  echo -e "${GREEN}📊 Dashboard will be available at:${NC}"
+  echo -e "${GREEN}   http://localhost:5001${NC}"
+  echo ""
+  echo -e "${YELLOW}ℹ️  HTTPS not enabled. Run ./ssl_setup.sh to generate certificates.${NC}"
+  EXTRA_ARGS=""
+fi
+
 echo -e "${GREEN}📱 Mobile access:${NC}"
-echo -e "${GREEN}   http://$(ifconfig | grep 'inet ' | grep -v 127.0.0.1 | head -1 | awk '{print $2}'):5001${NC}"
+LAN_IP=$(ifconfig | grep 'inet ' | grep -v 127.0.0.1 | head -1 | awk '{print $2}')
+if [ "$USE_HTTPS" = true ]; then
+  echo -e "${GREEN}   https://$LAN_IP:5001${NC}"
+else
+  echo -e "${GREEN}   http://$LAN_IP:5001${NC}"
+fi
+
 echo ""
 echo -e "${YELLOW}💡 Press Ctrl+C to stop the dashboard${NC}"
 echo ""
 
 # Start the web server
-python3 web_server.py --host 0.0.0.0 --port 5001
+python3 web_server.py --host 0.0.0.0 --port 5001 $EXTRA_ARGS | cat
