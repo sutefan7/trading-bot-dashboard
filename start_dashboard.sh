@@ -53,13 +53,13 @@ mkdir -p data logs
 echo -e "${YELLOW}🚀 Starting Trading Bot Dashboard...${NC}"
 echo ""
 echo -e "${GREEN}📊 Dashboard will be available at:${NC}"
-echo -e "${GREEN}   http://localhost:5000${NC}"
+echo -e "${GREEN}   http://localhost:5001${NC}"
 echo ""
 echo -e "${GREEN}📱 Mobile access:${NC}"
-echo -e "${GREEN}   http://$(ifconfig | grep 'inet ' | grep -v 127.0.0.1 | head -1 | awk '{print $2}'):5000${NC}"
+echo -e "${GREEN}   http://$(ifconfig | grep 'inet ' | grep -v 127.0.0.1 | head -1 | awk '{print $2}'):5001${NC}"
 echo ""
 echo -e "${YELLOW}💡 Press Ctrl+C to stop the dashboard${NC}"
 echo ""
 
 # Start the web server
-python3 web_server.py
+python3 web_server.py --host 0.0.0.0 --port 5001

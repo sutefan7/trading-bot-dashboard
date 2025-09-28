@@ -129,16 +129,17 @@
             transform: translate(-50%, -100%); 
             background: #111827; 
             color: #fff;
-            padding: 8px 12px; 
+            padding: 12px 16px; 
             border-radius: 6px; 
-            font-size: .85rem; 
+            font-size: .9rem; 
             opacity: 0; 
             pointer-events: none; 
             transition: .12s; 
             z-index: 1000;
-            max-width: 300px;
+            max-width: 400px;
             white-space: pre-line;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            line-height: 1.4;
         }
         
         .tooltip.visible { 
@@ -219,6 +220,18 @@
 
     <!-- Main Content -->
     <div class="container-fluid mt-4">
+        <!-- Kritieke Waarschuwingen - Bovenaan (standaard verborgen) -->
+        <div class="row mb-3" id="critical-alerts-container" style="display: none;">
+            <div class="col-12">
+                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>⚠️ Kritieke Waarschuwing:</strong> 
+                    <span id="critical-alert-text">Geen kritieke waarschuwingen</span>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            </div>
+        </div>
+
         <!-- System Status - Bovenaan -->
         <div class="row mb-4">
             <div class="col-12">
@@ -434,6 +447,7 @@
                             <div>
                                 <h6 class="card-title">Win Rate</h6>
                                 <h4 id="win-rate">0%</h4>
+                                <small>Percentage winnende trades</small>
                             </div>
                             <div class="align-self-center">
                                 <i class="fas fa-percentage fa-2x"></i>
@@ -466,6 +480,7 @@
                             <div>
                                 <h6 class="card-title">ML Confidence</h6>
                                 <h4 id="ml-confidence">0%</h4>
+                                <small>Model betrouwbaarheid</small>
                             </div>
                             <div class="align-self-center">
                                 <i class="fas fa-brain fa-2x"></i>
@@ -738,16 +753,109 @@
                         </div>
                     </div>
                 </section>
-            </div>
-        </div>
+                    </div>
+                </div>
 
         <!-- ========================================
-             ML & MARKET INTELLIGENCE SECTIE
-             ======================================== -->
+            ML & MARKET INTELLIGENCE SECTIE
+            ======================================== -->
         <div class="row mb-4">
             <div class="col-12">
                 <hr class="my-4">
                 <h4 class="text-center text-muted mb-4">🧠 ML & Market Intelligence</h4>
+            </div>
+        </div>
+
+        <!-- ML Models Overview -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <section class="panel" data-panel-id="ml-models" aria-expanded="true">
+                    <header class="panel-header" role="button" aria-expanded="true" aria-controls="panel-ml-models">
+                        <div class="panel-title">🤖 ML Models Overzicht</div>
+                        <div class="panel-actions">
+                            <button class="info-btn" aria-label="Info" data-tooltip="🤖 ML Models Overzicht:&#10;• Actieve modellen per coin&#10;• Training resultaten (accuracy, AUC)&#10;• Trading performance (win rate, returns)&#10;• Model details en features&#10;• Laatste training datum">i</button>
+                            <span class="chevron" aria-hidden="true">▾</span>
+                    </div>
+                    </header>
+                    <div id="panel-ml-models" class="panel-body">
+                        <!-- Summary Cards -->
+                        <div class="row mb-4">
+                            <div class="col-md-3">
+                                <div class="card bg-primary text-white">
+                                    <div class="card-body text-center">
+                                        <h5 id="total-models">0</h5>
+                                        <small>Totaal Modellen</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-success text-white">
+                                    <div class="card-body text-center">
+                                        <h5 id="active-models">0</h5>
+                                        <small>Actieve Modellen</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-info text-white">
+                                    <div class="card-body text-center">
+                                        <h5 id="avg-accuracy">0%</h5>
+                                        <small>Gem. Accuracy</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-warning text-white">
+                                    <div class="card-body text-center">
+                                        <h5 id="avg-win-rate">0%</h5>
+                                        <small>Gem. Win Rate</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Models Table -->
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="ml-models-table">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Coin</th>
+                                        <th>Model</th>
+                                        <th>Type</th>
+                                        <th>Training</th>
+                                        <th>Accuracy</th>
+                                        <th>AUC</th>
+                                        <th>Win Rate</th>
+                                        <th>Returns</th>
+                                        <th>Status</th>
+                                        <th>Confidence</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ml-models-tbody">
+                                    <tr>
+                                        <td colspan="10" class="text-center text-muted">ML models laden...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Model Details (Collapsible) -->
+                        <div class="mt-4">
+                            <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#model-details" aria-expanded="false">
+                                <i class="fas fa-info-circle me-1"></i>Gedetailleerde Model Informatie
+                            </button>
+                            <div class="collapse mt-3" id="model-details">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div id="model-details-content">
+                                            <p class="text-muted">Selecteer een model voor gedetailleerde informatie...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
 
@@ -832,7 +940,7 @@
                         </div>
                         <hr>
                         <h6>Universe Selectie:</h6>
-                        <div class="d-flex flex-wrap gap-1">
+                        <div class="d-flex flex-wrap gap-1" id="universe-selection">
                             <span class="badge bg-primary">BTC</span>
                             <span class="badge bg-primary">ETH</span>
                             <span class="badge bg-primary">ADA</span>
@@ -1071,6 +1179,139 @@
     
     <!-- Custom JavaScript -->
     <script src="{{ url_for('static', filename='js/dashboard.js') }}?v={{ range(100000000000, 999999999999) | random }}"></script>
+    
+    <!-- Debug Script -->
+    <script>
+        console.log('🔧 Debug script loaded');
+        console.log('🔧 Testing direct API call...');
+        
+        // Test if dashboard.js loaded correctly
+        setTimeout(() => {
+            if (typeof loadAllData === 'function') {
+                console.log('✅ loadAllData function found');
+            } else {
+                console.error('❌ loadAllData function not found');
+            }
+            
+            if (typeof updateMLModels === 'function') {
+                console.log('✅ updateMLModels function found');
+            } else {
+                console.error('❌ updateMLModels function not found');
+            }
+            
+            // Fallback: manually load ML models data
+            if (typeof updateMLModels === 'function') {
+                console.log('🔧 Loading ML models data manually...');
+                fetch('/api/ml-models')
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('🔧 ML Models data loaded:', data);
+                        updateMLModels(data);
+                    })
+                    .catch(error => {
+                        console.error('🔧 ML Models error:', error);
+                    });
+            } else {
+                console.log('🔧 updateMLModels not found, defining fallback...');
+                
+                // Define fallback function
+                window.updateMLModels = function(data) {
+                    console.log('🔧 Fallback updateMLModels called with data:', data);
+                    if (!data || data.error) {
+                        console.warn('ML Models data error:', data?.error);
+                        return;
+                    }
+
+                    // Update summary cards
+                    const totalModels = document.getElementById('total-models');
+                    const activeModels = document.getElementById('active-models');
+                    const avgAccuracy = document.getElementById('avg-accuracy');
+                    const avgWinRate = document.getElementById('avg-win-rate');
+                    
+                    if (totalModels) totalModels.textContent = data.summary.total_models;
+                    if (activeModels) activeModels.textContent = data.summary.active_models;
+                    if (avgAccuracy) avgAccuracy.textContent = `${(data.summary.avg_accuracy * 100).toFixed(1)}%`;
+                    if (avgWinRate) avgWinRate.textContent = `${(data.summary.avg_win_rate * 100).toFixed(1)}%`;
+
+                    // Update models table
+                    const tbody = document.getElementById('ml-models-tbody');
+                    if (!tbody) {
+                        console.error('❌ ml-models-tbody element not found');
+                        return;
+                    }
+
+                    if (data.models.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">Geen ML modellen gevonden</td></tr>';
+                        return;
+                    }
+
+                    tbody.innerHTML = data.models.map(model => {
+                        const statusClass = model.status === 'active' ? 'badge bg-success' : 'badge bg-secondary';
+                        const confidenceClass = model.confidence > 0.7 ? 'text-success' : model.confidence > 0.5 ? 'text-warning' : 'text-danger';
+                        
+                        return `
+                            <tr style="cursor: pointer;" onclick="showModelDetails('${model.coin}')">
+                                <td><strong>${model.coin}</strong></td>
+                                <td><small>${model.model_name}</small></td>
+                                <td><small>${model.model_type}</small></td>
+                                <td><small>${model.training_date}</small></td>
+                                <td><span class="badge bg-info">${(model.performance.accuracy * 100).toFixed(1)}%</span></td>
+                                <td><span class="badge bg-primary">${model.performance.auc.toFixed(3)}</span></td>
+                                <td><span class="badge bg-success">${(model.trading_performance.win_rate * 100).toFixed(1)}%</span></td>
+                                <td><span class="badge ${model.trading_performance.total_return > 0 ? 'bg-success' : 'bg-danger'}">${(model.trading_performance.total_return * 100).toFixed(1)}%</span></td>
+                                <td><span class="${statusClass}">${model.status}</span></td>
+                                <td><span class="${confidenceClass}">${(model.confidence * 100).toFixed(0)}%</span></td>
+                            </tr>
+                        `;
+                    }).join('');
+                    
+                    console.log('✅ ML Models table updated via fallback');
+                };
+                
+                // Define fallback showModelDetails function
+                window.showModelDetails = function(coin) {
+                    console.log(`Showing details for ${coin} model`);
+                    
+                    const detailsContent = document.getElementById('model-details-content');
+                    if (!detailsContent) return;
+                    
+                    detailsContent.innerHTML = `
+                        <h6>Gedetailleerde informatie voor ${coin} model</h6>
+                        <p class="text-muted">Klik op een model in de tabel hierboven voor gedetailleerde informatie...</p>
+                    `;
+                    
+                    // Show the collapse
+                    const collapse = document.getElementById('model-details');
+                    if (collapse) {
+                        const bsCollapse = new bootstrap.Collapse(collapse, { show: true });
+                    }
+                };
+                
+                // Load ML models data
+                fetch('/api/ml-models')
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('🔧 ML Models data loaded via fallback:', data);
+                        window.updateMLModels(data);
+                    })
+                    .catch(error => {
+                        console.error('🔧 ML Models error via fallback:', error);
+                    });
+            }
+        }, 1000);
+        
+        fetch('/health')
+            .then(response => {
+                console.log('🔧 Health response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('🔧 Health data:', data);
+            })
+            .catch(error => {
+                console.error('🔧 Health error:', error);
+            });
+    </script>
     
 </body>
 </html>

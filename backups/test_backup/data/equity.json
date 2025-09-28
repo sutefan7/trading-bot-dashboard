@@ -1,0 +1,24 @@
+{
+  "filename": "equity.csv",
+  "last_updated": "2025-09-27T16:50:08.790906",
+  "rows": 1,
+  "columns": [
+    "timestamp",
+    "balance",
+    "pnl",
+    "total_trades",
+    "winning_trades",
+    "losing_trades",
+    "win_rate"
+  ],
+  "file_size": 124,
+  "data_types": {
+    "timestamp": "object",
+    "balance": "float64",
+    "pnl": "float64",
+    "total_trades": "int64",
+    "winning_trades": "int64",
+    "losing_trades": "int64",
+    "win_rate": "float64"
+  }
+}

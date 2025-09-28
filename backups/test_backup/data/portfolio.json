@@ -1,0 +1,30 @@
+{
+  "filename": "portfolio.csv",
+  "last_updated": "2025-09-27T16:50:08.786142",
+  "rows": 1,
+  "columns": [
+    "timestamp",
+    "symbol",
+    "side",
+    "qty_req",
+    "qty_filled",
+    "status",
+    "pnl_after",
+    "balance_after",
+    "model_id",
+    "model_ver"
+  ],
+  "file_size": 160,
+  "data_types": {
+    "timestamp": "object",
+    "symbol": "float64",
+    "side": "float64",
+    "qty_req": "float64",
+    "qty_filled": "float64",
+    "status": "float64",
+    "pnl_after": "float64",
+    "balance_after": "float64",
+    "model_id": "float64",
+    "model_ver": "float64"
+  }
+}

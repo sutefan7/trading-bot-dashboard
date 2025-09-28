@@ -116,12 +116,16 @@ const utils = {
         } catch (e) {
             console.error(e);
             onError?.(e);
-            if (domRefs.globalAlert) {
+            // Only show error if it's a real connection error, not just missing data
+            if (domRefs.globalAlert && e.message && e.message.includes('fetch')) {
                 domRefs.globalAlert.innerHTML = `
                     <div class="alert alert-warning d-flex align-items-center" role="alert">
                         <i class="fa-solid fa-triangle-exclamation me-2"></i>
                         <div>Kon data niet ophalen. Probeer later opnieuw.</div>
                     </div>`;
+            } else if (domRefs.globalAlert) {
+                // Clear any existing alerts for data loading issues
+                domRefs.globalAlert.innerHTML = '';
             }
             return null;
         }
@@ -164,6 +168,7 @@ const ui = {
         } else {
             domRefs.syncBanner.innerHTML = 'Nooit gesynchroniseerd';
         }
+        if (domRefs.syncBanner && domRefs.syncBanner.style) domRefs.syncBanner.style.display = 'block';
     },
     
     renderStatusBadge(element, status) {
@@ -186,6 +191,7 @@ const ui = {
 // GLOBAL VARIABLES & CONFIGURATION
 // ============================================================================
 let autoRefreshInterval = null;
+let dataFreshnessInterval = null;
 let isSyncing = false;
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const API_BASE = '/api';
@@ -376,6 +382,7 @@ function initializeCharts() {
 async function loadAllData() {
     return await utils.withTry(async () => {
         console.log('📊 Dashboard data laden...');
+        console.log('🔧 API_BASE:', API_BASE);
         
         // Update state
         state.lastSyncAt = new Date().toISOString();
@@ -391,10 +398,11 @@ async function loadAllData() {
             fetchData('/bot-activity').catch(e => { console.error('Bot activity error:', e); return {error: 'Bot activity failed'}; }),
             fetchData('/ml-insights').catch(e => { console.error('ML insights error:', e); return {error: 'ML insights failed'}; }),
             fetchData('/market-intelligence').catch(e => { console.error('Market intelligence error:', e); return {error: 'Market intelligence failed'}; }),
-            fetchData('/real-time-alerts').catch(e => { console.error('Real-time alerts error:', e); return {error: 'Real-time alerts failed'}; })
+            fetchData('/real-time-alerts').catch(e => { console.error('Real-time alerts error:', e); return {error: 'Real-time alerts failed'}; }),
+            fetchData('/ml-models').catch(e => { console.error('ML models error:', e); return {error: 'ML models failed'}; })
         ];
         
-        const [tradingData, portfolioData, portfolioDetails, equityData, statusData, botActivityData, mlInsights, marketIntelligence, realTimeAlerts] = await Promise.all(promises);
+        const [tradingData, portfolioData, portfolioDetails, equityData, statusData, botActivityData, mlInsights, marketIntelligence, realTimeAlerts, mlModelsData] = await Promise.all(promises);
         
         // Update state
         state.portfolio = portfolioData;
@@ -402,6 +410,7 @@ async function loadAllData() {
         state.ml = mlInsights;
         state.risk = marketIntelligence;
         state.alerts = realTimeAlerts;
+        state.mlModels = mlModelsData;
         
         // Update UI with data (each function handles errors internally)
         ui.updateTradingPerformance(tradingData);
@@ -413,9 +422,17 @@ async function loadAllData() {
         ui.updateMLInsights(mlInsights);
         ui.updateMarketIntelligence(marketIntelligence);
         ui.updateRealTimeAlerts(realTimeAlerts);
+        ui.updateMLModels(mlModelsData);
+        
+        // Update sync timestamp
+        state.lastSyncAt = new Date().toISOString();
+        state.dataFreshnessMin = 0;
         
         // Update sync banner
         ui.renderSyncBanner();
+        
+        // Start data freshness timer
+        startDataFreshnessTimer();
         
         console.log('✅ Dashboard data loaded');
     });
@@ -426,11 +443,16 @@ async function loadAllData() {
  */
 async function fetchData(endpoint) {
     try {
-        const response = await fetch(API_BASE + endpoint);
+        const url = API_BASE + endpoint;
+        console.log('🔧 Fetching:', url);
+        const response = await fetch(url);
+        console.log('🔧 Response status:', response.status, response.statusText);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        return await response.json();
+        const data = await response.json();
+        console.log('🔧 Data received for', endpoint, ':', data);
+        return data;
     } catch (error) {
         console.error(`Error fetching ${endpoint}:`, error);
         throw error;
@@ -490,6 +512,11 @@ Object.assign(ui, {
                 'portfolio-pnl': '⚠️ Geen data'
             });
         return;
+    }
+    
+    // Check if this is demo mode
+    if (data.demo_mode) {
+        console.log('Portfolio in demo mode - showing start capital');
     }
     
         // Update KPIs with color logic
@@ -610,28 +637,28 @@ Object.assign(ui, {
     },
     
     updateBotStatus(data) {
-    if (data.error) {
-        console.warn('Bot status data error:', data.error);
-        return;
-    }
-    
-        // Update bot status (safely)
-    const statusElement = document.getElementById('bot-status');
-    const statusBadge = document.getElementById('pi-status');
-    
-        if (statusElement && statusBadge) {
-    if (data.pi_online) {
-                this.renderStatusBadge(statusElement, 'online');
+        if (data.error) {
+            console.warn('Bot status data error:', data.error);
+            return;
+        }
+        
+        // Update Pi connection status (safely)
+        const statusBadge = document.getElementById('pi-status');
+        
+        if (statusBadge) {
+            if (data.pi_online) {
                 this.renderStatusBadge(statusBadge, 'online');
-    } else {
-                this.renderStatusBadge(statusElement, 'offline');
+            } else {
                 this.renderStatusBadge(statusBadge, 'offline');
             }
         }
         
         // Update system status (safely)
-        utils.safeUpdateElement('last-sync', this.formatDateTime(data.last_sync));
-        utils.safeUpdateElement('data-files', data.data_files);
+        utils.safeUpdateElement('last-sync', data.last_sync || 'Onbekend');
+        utils.safeUpdateElement('data-files', data.data_files || 0);
+        
+        // Update last update time in header
+        utils.safeUpdateElement('last-update-time', data.last_sync || 'Onbekend');
     },
     
     updateBotActivity(data) {
@@ -874,10 +901,34 @@ Object.assign(ui, {
                 }
             }
             
+            // Update universe selection
+            this.updateUniverseSelection(marketOverview.universe_selection || []);
+            
             console.log('Market intelligence updated successfully');
         } catch (error) {
             console.error('Error updating market intelligence:', error);
         }
+    },
+    
+    updateUniverseSelection(coins) {
+        // Find the universe selection container by ID
+        const universeContainer = document.getElementById('universe-selection');
+        if (!universeContainer) {
+            console.warn('Universe selection container not found');
+            return;
+        }
+        
+        if (coins.length === 0) {
+            universeContainer.innerHTML = '<span class="text-muted">Geen coins geselecteerd</span>';
+            return;
+        }
+        
+        // Create badges for each coin
+        universeContainer.innerHTML = coins.map(coin => 
+            `<span class="badge bg-primary">${coin}</span>`
+        ).join('');
+        
+        console.log('Universe selection updated with coins:', coins);
     },
     
     updateRealTimeAlerts(data) {
@@ -891,6 +942,11 @@ Object.assign(ui, {
         try {
             // Update alert count
             utils.safeUpdateElement('total-alerts', data.total_alerts || '0');
+            
+            // Update top critical alert banner
+            if (data.critical_alerts) {
+                this.updateCriticalAlertBanner(data.critical_alerts);
+            }
             
             // Update critical alerts
             if (data.critical_alerts && domRefs.criticalAlerts) {
@@ -991,34 +1047,50 @@ Object.assign(ui, {
     formatTime(timeString) {
         if (!timeString) return '--:--';
         
-        // If the timeString is already formatted (contains -), return as is
-        if (timeString.includes('-') && timeString.includes(':')) {
-            return timeString;
-        }
-        
         try {
             const date = new Date(timeString);
             if (isNaN(date.getTime())) {
                 return timeString; // Return original if can't parse
             }
-            return date.toLocaleTimeString('en-US', { 
-                hour12: false, 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            });
+            
+            // Format as Dutch date and time
+            const options = {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: 'Europe/Amsterdam'
+            };
+            
+            return date.toLocaleString('nl-NL', options);
         } catch (error) {
             return timeString;
         }
     },
     
     formatDateTime(dateString) {
-        if (!dateString) return 'Never';
+        if (!dateString) return 'Nooit';
         
         try {
             const date = new Date(dateString);
-            return date.toLocaleString();
+            if (isNaN(date.getTime())) {
+                return 'Ongeldige Datum';
+            }
+            
+            // Format as Dutch date and time
+            const options = {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: 'Europe/Amsterdam'
+            };
+            
+            return date.toLocaleString('nl-NL', options);
         } catch (error) {
-            return 'Invalid Date';
+            return 'Ongeldige Datum';
         }
     }
 });
@@ -1041,6 +1113,25 @@ function startAutoRefresh() {
     }, REFRESH_INTERVAL);
     
     console.log(`⏰ Auto-refresh started (${REFRESH_INTERVAL / 1000}s interval)`);
+}
+
+/**
+ * Start data freshness timer
+ */
+function startDataFreshnessTimer() {
+    if (dataFreshnessInterval) {
+        clearInterval(dataFreshnessInterval);
+    }
+    
+    dataFreshnessInterval = setInterval(() => {
+        if (state.lastSyncAt) {
+            const now = new Date();
+            const lastSync = new Date(state.lastSyncAt);
+            const diffMinutes = Math.floor((now - lastSync) / (1000 * 60));
+            state.dataFreshnessMin = diffMinutes;
+            ui.renderSyncBanner();
+        }
+    }, 60000); // Update every minute
 }
 
 /**
@@ -1080,6 +1171,11 @@ async function syncNow() {
         if (result.success) {
             console.log('✅ Manual sync completed');
             showSuccess('Synchronisatie succesvol voltooid');
+            
+            // Update sync timestamp immediately
+            state.lastSyncAt = new Date().toISOString();
+            state.dataFreshnessMin = 0;
+            ui.renderSyncBanner();
             
             // Reload data after sync
             setTimeout(() => {
@@ -1427,7 +1523,23 @@ document.addEventListener('DOMContentLoaded', function() {
     // Start auto-refresh
     startAutoRefresh();
     
+    // Initial critical alert banner if data already present
+    if (state.alerts && state.alerts.critical_alerts) {
+        ui.updateCriticalAlertBanner(state.alerts.critical_alerts);
+    }
+
     console.log('✅ Enhanced Dashboard initialized');
+    console.log('🔧 Testing API connection...');
+    
+    // Test API connection
+    fetch('/health')
+        .then(response => response.json())
+        .then(data => {
+            console.log('🔧 API Health Check:', data);
+        })
+        .catch(error => {
+            console.error('🔧 API Health Check Failed:', error);
+        });
 });
 
 // ============================================================================
@@ -1436,6 +1548,9 @@ document.addEventListener('DOMContentLoaded', function() {
 window.syncNow = syncNow;
 window.setAllPanels = setAllPanels;
 window.renderKpi = renderKpi;
+window.showModelDetails = showModelDetails;
+window.updateMLModels = ui.updateMLModels;
+window.updateCriticalAlertBanner = ui.updateCriticalAlertBanner;
 
 // ============================================================================
 // END OF MODULAR DASHBOARD.JS

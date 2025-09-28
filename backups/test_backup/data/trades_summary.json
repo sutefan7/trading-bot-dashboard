@@ -1,0 +1,22 @@
+{
+  "filename": "trades_summary.csv",
+  "last_updated": "2025-09-27T16:50:08.788461",
+  "rows": 1,
+  "columns": [
+    "timestamp",
+    "total_trades",
+    "unique_requests",
+    "chain_integrity",
+    "verified_records",
+    "total_records"
+  ],
+  "file_size": 133,
+  "data_types": {
+    "timestamp": "object",
+    "total_trades": "int64",
+    "unique_requests": "int64",
+    "chain_integrity": "bool",
+    "verified_records": "int64",
+    "total_records": "int64"
+  }
+}
