@@ -57,9 +57,12 @@ if [ "$password" != "$password_confirm" ]; then
     exit 1
 fi
 
-# Genereer wachtwoord hash
-echo -e "${YELLOW}🔐 Wachtwoord hash genereren...${NC}"
-password_hash=$(echo -n "$password" | shasum -a 256 | cut -d' ' -f1)
+# Genereer wachtwoord hash met Python werkzeug (PBKDF2)
+echo -e "${YELLOW}🔐 Veilige wachtwoord hash genereren (PBKDF2-SHA256)...${NC}"
+password_hash=$(python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('$password', method='pbkdf2:sha256'))")
+
+# Genereer secret key voor Flask sessions
+secret_key=$(python3 -c "import os; print(os.urandom(32).hex())")
 
 # Schrijf configuratie naar .env bestand
 echo -e "${YELLOW}📝 Configuratie opslaan...${NC}"
@@ -72,8 +75,36 @@ DASHBOARD_AUTH_ENABLED=True
 DASHBOARD_USERNAME=$username
 DASHBOARD_PASSWORD_HASH=$password_hash
 
-# Debug Mode (set to True for development)
+# Security
+DASHBOARD_SECRET_KEY=$secret_key
+
+# Debug Mode (set to True for development, False for production)
 DASHBOARD_DEBUG=False
+
+# Environment (development, production, testing)
+DASHBOARD_ENV=production
+
+# Server Configuration
+DASHBOARD_HOST=0.0.0.0
+DASHBOARD_PORT=5001
+
+# Pi Configuration
+PI_HOST=stephang@192.168.1.104
+PI_PATH=/home/stephang/trading-bot-v4/storage/reports
+
+# Sync Configuration
+SYNC_INTERVAL_MINUTES=5
+SYNC_TIMEOUT_SECONDS=30
+
+# Cache Configuration
+CACHE_ENABLED=True
+CACHE_TIMEOUT_SECONDS=60
+
+# Backup Configuration
+BACKUP_RETENTION_DAYS=30
+MAX_BACKUPS=50
+AUTO_BACKUP_ENABLED=True
+AUTO_BACKUP_INTERVAL_HOURS=24
 EOF
 
 # Stel permissies in
@@ -101,7 +132,9 @@ echo ""
 echo -e "${BLUE}🔒 Beveiligingsverbeteringen:${NC}"
 echo -e "${BLUE}   • Dashboard toegang vereist login${NC}"
 echo -e "${BLUE}   • API endpoints zijn beveiligd${NC}"
-echo -e "${BLUE}   • Wachtwoord wordt veilig opgeslagen (hash)${NC}"
+echo -e "${BLUE}   • Wachtwoord gebruikt PBKDF2-SHA256 hashing${NC}"
+echo -e "${BLUE}   • Flask secret key gegenereerd voor sessions${NC}"
+echo -e "${BLUE}   • CSRF protection ingeschakeld${NC}"
 echo -e "${BLUE}   • Alle toegang wordt gelogd${NC}"
 echo ""
 echo -e "${BLUE}📝 Belangrijke informatie:${NC}"

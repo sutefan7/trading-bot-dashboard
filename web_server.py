@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Trading Bot Dashboard - Flask Web Server
-Provides REST API for dashboard data
+Provides REST API for dashboard data with enhanced security and performance
 """
 import os
 import json
@@ -14,111 +14,120 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_httpauth import HTTPBasicAuth
+from flask_wtf.csrf import CSRFProtect
+from werkzeug.security import check_password_hash, generate_password_hash
 import logging
 import re
-import hashlib
-import base64
 import ssl
 import argparse
+import time
 
-# Import our data sync manager
+# Import our modules
+from config import Config, get_config
+from database import DatabaseManager
+from cache import cache, cached, clear_cache_pattern
 from data_sync import DataSyncManager
 from backup_system import BackupManager
 from audit_logger import audit_logger, log_api_access, log_sync_activity
 
-# Setup logging
+# Initialize configuration
+config = get_config()
+
+# Setup logging with rotation
+from logging.handlers import RotatingFileHandler
+
+config.init_app()  # Initialize directories
+
+log_handler = RotatingFileHandler(
+    config.LOGS_DIR / 'server.log',
+    maxBytes=config.LOG_MAX_BYTES,
+    backupCount=config.LOG_BACKUP_COUNT
+)
+log_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+))
+
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/security.log'),
-        logging.StreamHandler()
-    ]
+    level=getattr(logging, config.LOG_LEVEL),
+    handlers=[log_handler, logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
 # Security logger
 security_logger = logging.getLogger('security')
-security_handler = logging.FileHandler('logs/security.log')
-security_handler.setFormatter(logging.Formatter('%(asctime)s - SECURITY - %(levelname)s - %(message)s'))
+security_handler = RotatingFileHandler(
+    config.LOGS_DIR / 'security.log',
+    maxBytes=config.LOG_MAX_BYTES,
+    backupCount=config.LOG_BACKUP_COUNT
+)
+security_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - SECURITY - %(levelname)s - %(message)s'
+))
 security_logger.addHandler(security_handler)
 security_logger.setLevel(logging.INFO)
 
 # Flask app
 app = Flask(__name__)
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv('DASHBOARD_ALLOWED_ORIGINS', 'http://localhost:5001,http://127.0.0.1:5001,https://localhost:5001,https://127.0.0.1:5001').split(',') if o.strip()]
-CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "supports_credentials": True}})
+app.config['SECRET_KEY'] = config.SECRET_KEY
+app.config['WTF_CSRF_TIME_LIMIT'] = None  # No time limit for CSRF tokens
+
+# CORS configuration
+CORS(app, resources={
+    r"/api/*": {
+        "origins": config.ALLOWED_ORIGINS,
+        "supports_credentials": True
+    }
+})
+
+# CSRF Protection
+csrf = CSRFProtect(app)
 
 # Authentication
 auth = HTTPBasicAuth()
 
-# Rate limiting
+# Rate limiting with configuration
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=["1000 per hour", "100 per minute"]
+    app=app,
+    default_limits=[config.RATE_LIMIT_DEFAULT],
+    storage_uri="memory://"
 )
-limiter.init_app(app)
 
-# Configuration
-DATA_DIR = Path(__file__).parent / "data"
-
-# Initialize data sync manager and backup manager
+# Initialize managers
+db_manager = DatabaseManager(config.DATABASE_PATH)
 sync_manager = DataSyncManager()
-backup_manager = BackupManager(DATA_DIR)
+backup_manager = BackupManager(config.DATA_DIR)
 
-# Security configuration
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB max file size
-ALLOWED_CSV_COLUMNS = {
-    'trades_summary.csv': ['timestamp', 'total_trades', 'unique_requests', 'chain_integrity', 'verified_records', 'total_records'],
-    'portfolio.csv': ['timestamp', 'symbol', 'side', 'qty_req', 'qty_filled', 'status', 'pnl_after', 'balance_after', 'model_id', 'model_ver'],
-    'equity.csv': ['timestamp', 'balance', 'pnl', 'total_trades', 'winning_trades', 'losing_trades', 'win_rate']
-}
+logger.info("="*60)
+logger.info("🚀 Trading Bot Dashboard Starting")
+logger.info("="*60)
+logger.info(f"📊 Config: {config.get_config_summary()}")
+logger.info(f"💾 Database: {config.DATABASE_PATH}")
+logger.info(f"🗂️  Cache: {'Enabled' if config.CACHE_ENABLED else 'Disabled'}")
+logger.info("="*60)
 
-# Authentication configuration (will be loaded from .env file)
-AUTH_ENABLED = True
-AUTH_USERNAME = 'admin'
-AUTH_PASSWORD_HASH = ''
-
-# LAN allowlist
-ALLOWED_IP_RANGES = [
-    '127.0.0.1',
-    '::1',
-    '192.168.',
-    '10.',
-    '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.'
-]
-
-# SSL/HTTPS configuration
-SSL_CERT_FILE = 'ssl/dashboard.crt'
-SSL_KEY_FILE = 'ssl/dashboard.key'
+# HTTPS state
 HTTPS_ENABLED = False
 
-def set_https_mode(enabled):
+def set_https_mode(enabled: bool):
     """Set HTTPS mode"""
     global HTTPS_ENABLED
     HTTPS_ENABLED = enabled
 
-def load_auth_config():
-    """Load authentication configuration from environment variables"""
-    global AUTH_ENABLED, AUTH_USERNAME, AUTH_PASSWORD_HASH
-    AUTH_ENABLED = os.getenv('DASHBOARD_AUTH_ENABLED', 'True').lower() == 'true'
-    AUTH_USERNAME = os.getenv('DASHBOARD_USERNAME', 'admin')
-    AUTH_PASSWORD_HASH = os.getenv('DASHBOARD_PASSWORD_HASH', '')
 
 @app.before_request
 def restrict_to_local_network():
+    """Restrict access to local/private network IPs only"""
     try:
         ip = get_remote_address()
-        # Always allow localhost
-        if ip in ('127.0.0.1', '::1'):
-            return
-        # Allow typical private ranges
-        for prefix in ALLOWED_IP_RANGES:
-            if ip.startswith(prefix):
-                return
-        # Otherwise block
-        security_logger.warning(f"Blocked request from non-local IP: {ip}")
-        return jsonify({"error": "Access restricted to local network"}), 403
+        
+        # Use robust IP validation from config
+        if not config.is_private_ip(ip):
+            security_logger.warning(f"🚫 Blocked request from non-local IP: {ip}")
+            return jsonify({"error": "Access restricted to local network"}), 403
+        
+        return None  # Allow request
+        
     except Exception as e:
         security_logger.error(f"IP restriction error: {e}")
         return jsonify({"error": "Access control error"}), 500
@@ -192,37 +201,44 @@ class SecurityValidator:
 
 # Authentication functions
 @auth.verify_password
-def verify_password(username, password):
-    """Verify user credentials"""
-    if not AUTH_ENABLED:
+def verify_password(username: str, password: str) -> bool:
+    """
+    Verify user credentials using secure password hashing
+    Uses werkzeug's check_password_hash (PBKDF2-SHA256)
+    """
+    if not config.AUTH_ENABLED:
         return True  # Authentication disabled
     
-    if not AUTH_PASSWORD_HASH:
-        security_logger.warning("Authentication enabled but no password hash configured")
+    if not config.AUTH_PASSWORD_HASH:
+        security_logger.warning("⚠️  Authentication enabled but no password hash configured")
         return False
     
-    # Check username
-    if username != AUTH_USERNAME:
-        security_logger.warning(f"Authentication failed: invalid username '{username}' from {get_remote_address()}")
+    # Check username (don't log the attempted username for security)
+    if username != config.AUTH_USERNAME:
+        security_logger.warning(f"🚫 Authentication failed from {get_remote_address()}")
         return False
     
-    # Verify password hash
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    if password_hash == AUTH_PASSWORD_HASH:
-        security_logger.info(f"Authentication successful for user '{username}' from {get_remote_address()}")
-        return True
-    else:
-        security_logger.warning(f"Authentication failed: invalid password for user '{username}' from {get_remote_address()}")
+    # Verify password hash using werkzeug (PBKDF2)
+    try:
+        if check_password_hash(config.AUTH_PASSWORD_HASH, password):
+            security_logger.info(f"✅ Authentication successful from {get_remote_address()}")
+            return True
+        else:
+            security_logger.warning(f"🚫 Authentication failed (invalid password) from {get_remote_address()}")
+            return False
+    except Exception as e:
+        security_logger.error(f"❌ Password verification error: {e}")
         return False
 
 
 @auth.error_handler
-def auth_error(status):
+def auth_error(status: int):
     """Handle authentication errors"""
-    security_logger.warning(f"Authentication error {status} from {get_remote_address()}")
+    security_logger.warning(f"🚫 Authentication error {status} from {get_remote_address()}")
     return jsonify({
         "error": "Authentication required",
-        "status": status
+        "status": status,
+        "message": "Please provide valid credentials"
     }), status
 
 
@@ -1440,7 +1456,7 @@ class DataProcessor:
 
 
 # Initialize data processor
-data_processor = DataProcessor(DATA_DIR)
+data_processor = DataProcessor(config.DATA_DIR)
 
 
 @app.route('/')
@@ -1460,14 +1476,83 @@ def test_page():
 
 @app.route('/health')
 @app.route('/api/health')
+@csrf.exempt  # Health check doesn't need CSRF protection
 def health_check():
-    """Health check endpoint (no auth required)"""
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "https_enabled": HTTPS_ENABLED,
-        "auth_enabled": AUTH_ENABLED
-    })
+    """
+    Health check endpoint (no auth required)
+    Returns system health and statistics
+    """
+    try:
+        # Get database stats
+        db_stats = db_manager.get_database_stats()
+        cache_stats = cache.get_stats()
+        
+        # Check Pi connectivity
+        pi_online = sync_manager.check_pi_connectivity()
+        
+        return jsonify({
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "https_enabled": HTTPS_ENABLED,
+            "auth_enabled": config.AUTH_ENABLED,
+            "database": {
+                "connected": True,
+                "size_mb": db_stats.get('database_size_mb', 0),
+                "total_records": sum(v for k, v in db_stats.items() if k.endswith('_count'))
+            },
+            "cache": cache_stats,
+            "pi_connection": {
+                "online": pi_online,
+                "host": config.PI_HOST
+            },
+            "environment": os.getenv('DASHBOARD_ENV', 'production')
+        })
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/stats')
+@auth.login_required
+@limiter.limit(config.RATE_LIMIT_API)
+def api_stats():
+    """Get system statistics"""
+    try:
+        db_stats = db_manager.get_database_stats()
+        cache_stats = cache.get_stats()
+        sync_status = sync_manager.get_sync_status()
+        
+        return jsonify({
+            "database": db_stats,
+            "cache": cache_stats,
+            "sync": sync_status,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/cache/clear', methods=['POST'])
+@auth.login_required
+@limiter.limit("5 per minute")
+def api_clear_cache():
+    """Clear application cache"""
+    try:
+        cache.clear()
+        security_logger.info(f"🗑️  Cache cleared by {get_remote_address()}")
+        return jsonify({
+            "success": True,
+            "message": "Cache cleared successfully",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Cache clear error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/trading-performance')
@@ -1516,7 +1601,10 @@ def api_sync_status():
 @auth.login_required
 @limiter.limit("5 per minute")
 def api_sync_now():
-    """API endpoint to trigger manual sync"""
+    """
+    API endpoint to trigger manual sync
+    Syncs CSV files from Pi and imports into database
+    """
     client_ip = get_remote_address()
     start_time = datetime.now()
     
@@ -1524,26 +1612,46 @@ def api_sync_now():
     log_api_access('/api/sync-now', 'POST', 200)
     
     try:
+        # Sync files from Pi
         success = sync_manager.sync_data_from_pi()
+        
+        if success:
+            # Import CSV data into database
+            imported = db_manager.import_from_csv(config.DATA_DIR)
+            
+            # Clear cache to force refresh
+            cache.clear()
+            
+            logger.info(f"📊 Data imported into database: {imported}")
+        
         response_time = (datetime.now() - start_time).total_seconds() * 1000
         
         # Log sync activity
         log_sync_activity('MANUAL_SYNC', success, 
                          files_synced=sync_manager.get_sync_status().get('local_files', 0))
         
-        security_logger.info(f"Manual sync {'successful' if success else 'failed'} from {client_ip}")
+        # Record in database
+        db_manager.record_sync_status(
+            status='success' if success else 'failed',
+            files_synced=sync_manager.get_sync_status().get('local_files', 0),
+            duration_ms=response_time
+        )
+        
+        security_logger.info(f"✅ Manual sync {'successful' if success else 'failed'} from {client_ip}")
         
         return jsonify({
             "success": success,
-            "message": "Sync completed" if success else "Sync failed",
+            "message": "Sync completed successfully" if success else "Sync failed",
             "timestamp": datetime.now().isoformat(),
             "response_time_ms": round(response_time, 2),
-            "sync_status": sync_manager.get_sync_status()
+            "sync_status": sync_manager.get_sync_status(),
+            "imported_records": imported if success else {}
         })
     except Exception as e:
         response_time = (datetime.now() - start_time).total_seconds() * 1000
         log_sync_activity('MANUAL_SYNC', False, str(e))
-        security_logger.error(f"Manual sync error from {client_ip}: {str(e)}")
+        db_manager.record_sync_status(status='error', duration_ms=response_time, error=str(e))
+        security_logger.error(f"❌ Manual sync error from {client_ip}: {str(e)}")
         return jsonify({
             "success": False,
             "message": str(e),
@@ -1875,52 +1983,82 @@ if __name__ == '__main__':
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Trading Bot Dashboard Web Server')
     parser.add_argument('--https', action='store_true', help='Enable HTTPS mode')
-    parser.add_argument('--port', type=int, default=5001, help='Port to run on (default: 5001)')
-    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to (default: 0.0.0.0)')
+    parser.add_argument('--port', type=int, default=config.PORT, help=f'Port to run on (default: {config.PORT})')
+    parser.add_argument('--host', default=config.HOST, help=f'Host to bind to (default: {config.HOST})')
+    parser.add_argument('--env', choices=['development', 'production', 'testing'], 
+                       default=os.getenv('DASHBOARD_ENV', 'production'),
+                       help='Environment mode')
     args = parser.parse_args()
     
-    # Load environment variables from .env file
-    env_file = Path(__file__).parent / '.env'
-    if env_file.exists():
-        with open(env_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    os.environ[key] = value
+    # Reload config with specified environment
+    config = get_config(args.env)
     
-    # Load authentication configuration
-    load_auth_config()
+    # Validate configuration
+    is_valid, errors = config.validate_config()
+    if not is_valid:
+        logger.error("="*60)
+        logger.error("❌ CONFIGURATION ERRORS")
+        logger.error("="*60)
+        for error in errors:
+            logger.error(f"  • {error}")
+        logger.error("="*60)
+        logger.error("Please fix configuration and restart")
+        exit(1)
     
     # Set HTTPS mode
     set_https_mode(args.https)
     
-    # Ensure directories exist
-    DATA_DIR.mkdir(exist_ok=True)
-    Path('logs').mkdir(exist_ok=True)
+    # Initialize database - import existing CSV data
+    logger.info("📊 Initializing database...")
+    if config.DATA_DIR.exists():
+        imported = db_manager.import_from_csv(config.DATA_DIR)
+        logger.info(f"📥 Imported records: {imported}")
     
-    # Production configuration
-    DEBUG_MODE = os.getenv('DASHBOARD_DEBUG', 'False').lower() == 'true'
+    # Log startup info
+    logger.info("="*60)
+    logger.info("🎯 Server Configuration")
+    logger.info("="*60)
+    logger.info(f"  • Environment: {args.env}")
+    logger.info(f"  • Host: {args.host}")
+    logger.info(f"  • Port: {args.port}")
+    logger.info(f"  • Debug: {config.DEBUG}")
+    logger.info(f"  • Auth: {'Enabled' if config.AUTH_ENABLED else 'Disabled'}")
+    logger.info(f"  • HTTPS: {'Enabled' if HTTPS_ENABLED else 'Disabled'}")
+    logger.info(f"  • Cache: {'Enabled' if config.CACHE_ENABLED else 'Disabled'}")
+    logger.info(f"  • Database: {config.DATABASE_PATH}")
+    logger.info("="*60)
     
     # Start web server
     if HTTPS_ENABLED:
         # Check if SSL files exist
-        cert_file = Path(__file__).parent / SSL_CERT_FILE
-        key_file = Path(__file__).parent / SSL_KEY_FILE
-        
-        if not cert_file.exists() or not key_file.exists():
+        if not config.SSL_CERT_FILE.exists() or not config.SSL_KEY_FILE.exists():
             logger.error("❌ SSL certificate files not found! Falling back to HTTP.")
+            logger.error(f"   Expected: {config.SSL_CERT_FILE}")
+            logger.error(f"   Expected: {config.SSL_KEY_FILE}")
+            logger.info("   Run ./ssl_setup.sh to generate SSL certificates")
             HTTPS_ENABLED = False
         else:
+            logger.info("")
             logger.info("🚀 Starting Trading Bot Dashboard Web Server (HTTPS)")
-            logger.info("📊 Dashboard available at: https://localhost:5001")
+            logger.info(f"📊 Dashboard: https://{args.host}:{args.port}")
             logger.info("🔐 SSL/TLS encryption enabled")
+            logger.info("")
+            logger.info("Press Ctrl+C to stop")
+            logger.info("="*60)
+            
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(cert_file, key_file)
-            app.run(host=args.host, port=args.port, debug=DEBUG_MODE, ssl_context=context, threaded=True)
+            context.load_cert_chain(config.SSL_CERT_FILE, config.SSL_KEY_FILE)
+            app.run(host=args.host, port=args.port, debug=config.DEBUG, 
+                   ssl_context=context, threaded=config.THREADED)
             exit(0)
-    # HTTP fallback
+    
+    # HTTP mode
+    logger.info("")
     logger.info("🚀 Starting Trading Bot Dashboard Web Server (HTTP)")
-    logger.info("📊 Dashboard available at: http://localhost:5001")
-    logger.info("⚠️  HTTP mode - consider using --https for production")
-    app.run(host=args.host, port=args.port, debug=DEBUG_MODE, threaded=True)
+    logger.info(f"📊 Dashboard: http://{args.host}:{args.port}")
+    logger.info("⚠️  HTTP mode - use --https for encrypted connection")
+    logger.info("")
+    logger.info("Press Ctrl+C to stop")
+    logger.info("="*60)
+    
+    app.run(host=args.host, port=args.port, debug=config.DEBUG, threaded=config.THREADED)
