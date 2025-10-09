@@ -147,8 +147,19 @@ python3 web_server.py --https --port 5001 --host 0.0.0.0 --env production
 └── README.md               # Deze file
 ```
 
-## 🔄 Data Flow
+## 🔄 Data Flow (v2.0)
 
+### **Primary Flow (Pi Online)**
+```
+Pi Database → PiAPIClient → Local CSV → Database → Cache → Dashboard
+```
+
+### **Fallback Flow (Pi Offline)**
+```
+Local CSV/Database → FallbackManager → Cache → Dashboard
+```
+
+### **Legacy Flow (Backward Compatibility)**
 ```
 Pi (192.168.1.104)          Mac (localhost)
 ├── CSV Reports (15min)  ──► ├── SCP Sync (5min)
@@ -157,30 +168,67 @@ Pi (192.168.1.104)          Mac (localhost)
 └── equity.csv               └── Charts & Visualizations
 ```
 
-## 📊 Dashboard Sections
+## 📊 Dashboard Sections (v2.0)
 
 ### **Status Cards**
-- **Bot Status**: Online/Offline status van Pi
-- **Total P&L**: Totale winst/verlies
-- **Win Rate**: Percentage winnende trades
-- **Total Trades**: Aantal uitgevoerde trades
+- **Bot Status**: Online/Offline status van Pi met health monitoring
+- **Total P&L**: Totale winst/verlies met real-time updates
+- **Win Rate**: Percentage winnende trades met trend analysis
+- **Total Trades**: Aantal uitgevoerde trades met growth metrics
 
-### **Charts**
-- **Equity Curve**: Portfolio balans over tijd
+### **Charts & Visualizations**
+- **Equity Curve**: Portfolio balans over tijd met interactive zoom
 - **Win/Loss Breakdown**: Pie chart van winnende vs verliezende trades
-- **Trading Statistics**: Gemiddelde win/loss, profit factor
+- **Trading Statistics**: Gemiddelde win/loss, profit factor, Sharpe ratio
+- **Performance Metrics**: Real-time performance indicators
 
 ### **Portfolio Overview**
-- **Total Balance**: Totale portefeuille waarde
+- **Total Balance**: Totale portefeuille waarde met currency formatting
 - **Available Balance**: Beschikbaar voor nieuwe trades
-- **Open Positions**: Aantal openstaande posities
-- **Total P&L**: Huidige winst/verlies
+- **Open Positions**: Aantal openstaande posities met details
+- **Total P&L**: Huidige winst/verlies met percentage change
 
-### **System Status**
-- **Pi Connection**: Status van Pi connectie
-- **Last Sync**: Laatste data sync tijd
-- **Data Files**: Aantal beschikbare CSV bestanden
+### **System Status & Health**
+- **Pi Connection**: Status van Pi connectie met detailed health info
+- **Data Sync**: Real-time sync status met fallback indicators
+- **System Health**: CPU, Memory, Disk usage monitoring
+- **Cache Performance**: Cache hit rate en performance metrics
+- **Error Monitoring**: Recent errors en system warnings
 - **Auto Refresh**: Status van automatische updates
+
+## 🚀 **Nieuwe Features (v2.0)**
+
+### **🔗 Pi Database Integration**
+- **Direct database sync** in plaats van CSV bestanden
+- **Real-time data ophalen** van Pi trading bot
+- **Automatische data validatie** en error handling
+- **SSH-based connectivity** met security
+
+### **🛡️ Intelligent Fallback System**
+- **Multi-layer fallback** wanneer Pi offline is
+- **Data freshness detection** voor optimal performance
+- **Automatic fallback activation** zonder user intervention
+- **Graceful degradation** met demo data als laatste redmiddel
+
+### **🏥 Comprehensive Health Monitoring**
+- **System resource monitoring** (CPU, Memory, Disk)
+- **Pi connectivity health** met detailed diagnostics
+- **Database health checks** en performance metrics
+- **Real-time alerts** voor system issues
+- **Historical health data** voor trend analysis
+
+### **⚡ Advanced Performance Optimizations**
+- **LRU caching** met automatic compression
+- **Memory optimization** voor grote datasets
+- **Parallel data processing** voor snellere updates
+- **Intelligent cache invalidation** op data changes
+
+### **🔌 Enhanced API Endpoints**
+- **Real-time Pi sync** via `/api/pi-sync`
+- **Health monitoring** via `/api/health-check`
+- **Fallback status** via `/api/fallback-status`
+- **System statistics** via `/api/stats`
+- **Backward compatibility** met legacy endpoints
 
 ## ⚙️ Configuratie
 

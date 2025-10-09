@@ -63,9 +63,16 @@ class Config:
     
     # Data sync configuration
     PI_HOST = os.getenv('PI_HOST', 'stephang@192.168.1.104')
-    PI_PATH = os.getenv('PI_PATH', '/home/stephang/trading-bot-v4/storage/reports')
+    PI_PATH = os.getenv('PI_PATH', '/srv/trading-bot-pi/app/storage/reports')
+    PI_APP_PATH = os.getenv('PI_APP_PATH', '/srv/trading-bot-pi/app')
+    PI_DATABASE_PATH = os.getenv('PI_DATABASE_PATH', '/srv/trading-bot-pi/app/data')
     SYNC_INTERVAL_MINUTES = int(os.getenv('SYNC_INTERVAL_MINUTES', '5'))
     SYNC_TIMEOUT_SECONDS = int(os.getenv('SYNC_TIMEOUT_SECONDS', '30'))
+    
+    # New Pi API configuration
+    PI_API_ENABLED = os.getenv('PI_API_ENABLED', 'True').lower() == 'true'
+    PI_API_PORT = int(os.getenv('PI_API_PORT', '8080'))
+    PI_API_TIMEOUT = int(os.getenv('PI_API_TIMEOUT', '10'))
     
     # Cache configuration
     CACHE_TIMEOUT_SECONDS = int(os.getenv('CACHE_TIMEOUT_SECONDS', '60'))

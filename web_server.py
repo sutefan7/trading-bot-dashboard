@@ -27,6 +27,9 @@ from config import Config, get_config
 from database import DatabaseManager
 from cache import cache, cached, clear_cache_pattern
 from data_sync import DataSyncManager
+from pi_api_client import PiAPIClient
+from fallback_manager import FallbackManager
+from health_monitor import HealthMonitor
 from backup_system import BackupManager
 from audit_logger import audit_logger, log_api_access, log_sync_activity
 
@@ -96,6 +99,9 @@ limiter = Limiter(
 # Initialize managers
 db_manager = DatabaseManager(config.DATABASE_PATH)
 sync_manager = DataSyncManager()
+pi_api_client = PiAPIClient()
+fallback_manager = FallbackManager()
+health_monitor = HealthMonitor()
 backup_manager = BackupManager(config.DATA_DIR)
 
 logger.info("="*60)
@@ -249,12 +255,28 @@ class DataProcessor:
         self.data_dir = data_dir
         
     def get_trading_performance(self) -> dict:
-        """Get trading performance metrics"""
+        """Get trading performance metrics from Pi artifacts with fallback support"""
         try:
+            # Check if Pi is online
+            pi_online = pi_api_client.check_pi_connectivity()
+            
+            if pi_online:
+                # Try to get data from Pi artifacts first
+                pi_data = pi_api_client.get_trading_performance_data()
+                if not pi_data.get("error"):
+                    logger.info("✅ Using Pi artifacts data for trading performance")
+                    return pi_data
+            
+            # Check if fallback is needed
+            if fallback_manager.is_fallback_needed(pi_online):
+                logger.info("🔄 Using fallback data - Pi unavailable or data too old")
+                return fallback_manager.get_fallback_trading_performance()
+            
             # Look for trades summary file
             trades_file = self.data_dir / "trades_summary.csv"
             if not trades_file.exists():
-                return {"error": "No trades data available"}
+                logger.warning("⚠️ No trades data file found, using fallback")
+                return fallback_manager.get_fallback_trading_performance()
             
             # Validate file security
             if not SecurityValidator.validate_csv_file(trades_file):
@@ -1487,8 +1509,9 @@ def health_check():
         db_stats = db_manager.get_database_stats()
         cache_stats = cache.get_stats()
         
-        # Check Pi connectivity
+        # Check Pi connectivity and health
         pi_online = sync_manager.check_pi_connectivity()
+        pi_health = pi_api_client.get_pi_health()
         
         return jsonify({
             "status": "healthy",
@@ -1503,7 +1526,8 @@ def health_check():
             "cache": cache_stats,
             "pi_connection": {
                 "online": pi_online,
-                "host": config.PI_HOST
+                "host": config.PI_HOST,
+                "health": pi_health
             },
             "environment": os.getenv('DASHBOARD_ENV', 'production')
         })
@@ -1511,6 +1535,172 @@ def health_check():
         logger.error(f"Health check error: {e}")
         return jsonify({
             "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/pi-sync', methods=['POST'])
+@auth.login_required
+@limiter.limit("5 per minute")
+def api_pi_sync():
+    """
+    API endpoint to trigger Pi database sync
+    Syncs data directly from Pi database instead of CSV files
+    """
+    client_ip = get_remote_address()
+    start_time = datetime.now()
+    
+    # Log API access
+    log_api_access('/api/pi-sync', 'POST', 200)
+    
+    try:
+        # Sync data from Pi database
+        result = pi_api_client.sync_trading_data()
+        
+        if result.get("error"):
+            success = False
+            message = result["error"]
+        else:
+            success = True
+            message = f"Pi sync successful: {result.get('trading_records', 0)} trades, {result.get('portfolio_records', 0)} portfolio, {result.get('equity_records', 0)} equity"
+            
+            # Import synced data into local database
+            imported = db_manager.import_from_csv(config.DATA_DIR)
+            
+            # Clear cache to force refresh
+            cache.clear()
+            
+            logger.info(f"📊 Pi data imported into database: {imported}")
+        
+        response_time = (datetime.now() - start_time).total_seconds() * 1000
+        
+        # Log sync activity
+        log_sync_activity('PI_DATABASE_SYNC', success, 
+                         records_synced=result.get('trading_records', 0) + result.get('portfolio_records', 0) + result.get('equity_records', 0))
+        
+        # Record in database
+        db_manager.record_sync_status(
+            status='success' if success else 'failed',
+            files_synced=0,  # No files, direct database sync
+            duration_ms=response_time,
+            error=result.get("error") if not success else None
+        )
+        
+        security_logger.info(f"✅ Pi database sync {'successful' if success else 'failed'} from {client_ip}")
+        
+        return jsonify({
+            "success": success,
+            "message": message,
+            "timestamp": datetime.now().isoformat(),
+            "response_time_ms": round(response_time, 2),
+            "sync_result": result,
+            "imported_records": imported if success else {}
+        })
+    except Exception as e:
+        response_time = (datetime.now() - start_time).total_seconds() * 1000
+        log_sync_activity('PI_DATABASE_SYNC', False, str(e))
+        db_manager.record_sync_status(status='error', duration_ms=response_time, error=str(e))
+        security_logger.error(f"❌ Pi database sync error from {client_ip}: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": str(e),
+            "timestamp": datetime.now().isoformat(),
+            "response_time_ms": round(response_time, 2)
+        }), 500
+
+
+@app.route('/api/pi-health')
+@auth.login_required
+@limiter.limit("30 per minute")
+def api_pi_health():
+    """API endpoint for Pi health information"""
+    try:
+        health_info = pi_api_client.get_pi_health()
+        return jsonify(health_info)
+    except Exception as e:
+        logger.error(f"Pi health check error: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/pi-database-info')
+@auth.login_required
+@limiter.limit("30 per minute")
+def api_pi_database_info():
+    """API endpoint for Pi database information"""
+    try:
+        db_info = pi_api_client.get_pi_database_info()
+        return jsonify(db_info)
+    except Exception as e:
+        logger.error(f"Pi database info error: {e}")
+        return jsonify({
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/fallback-status')
+@auth.login_required
+@limiter.limit("30 per minute")
+def api_fallback_status():
+    """API endpoint for fallback system status"""
+    try:
+        fallback_status = fallback_manager.get_fallback_status()
+        pi_online = pi_api_client.check_pi_connectivity()
+        
+        return jsonify({
+            "fallback_status": fallback_status,
+            "pi_online": pi_online,
+            "fallback_needed": fallback_manager.is_fallback_needed(pi_online),
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Fallback status error: {e}")
+        return jsonify({
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/health-check')
+@auth.login_required
+@limiter.limit("10 per minute")
+def api_health_check():
+    """API endpoint for comprehensive health check"""
+    try:
+        health_result = health_monitor.run_comprehensive_health_check()
+        return jsonify(health_result)
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return jsonify({
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/health-history')
+@auth.login_required
+@limiter.limit("30 per minute")
+def api_health_history():
+    """API endpoint for health check history"""
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        history = health_monitor.get_health_history(hours)
+        current_status = health_monitor.get_current_health_status()
+        
+        return jsonify({
+            "current_status": current_status,
+            "history": history,
+            "hours_requested": hours,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Health history error: {e}")
+        return jsonify({
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }), 500
@@ -1564,6 +1754,39 @@ def api_trading_performance():
     security_logger.info(f"API access: trading-performance from {client_ip}")
     return jsonify(data_processor.get_trading_performance())
 
+@app.route('/api/ml-model')
+@auth.login_required
+@limiter.limit("30 per minute")
+def api_ml_model():
+    """API endpoint for ML model data"""
+    client_ip = get_remote_address()
+    security_logger.info(f"API access: ml-model from {client_ip}")
+    
+    try:
+        # Try to get data from Pi artifacts first
+        if pi_api_client.check_pi_connectivity():
+            pi_data = pi_api_client.get_ml_model_data()
+            if not pi_data.get("error"):
+                return jsonify(pi_data)
+        
+        # Fallback to demo data
+        return jsonify({
+            "model_version": "demo_v1",
+            "symbols": ["BTC-USD", "ETH-USD"],
+            "train_window": "2023-01-01..2025-01-01",
+            "metrics": {"auc": 0.75, "accuracy": 0.68},
+            "verified": False,
+            "created_at": datetime.now().isoformat(),
+            "feature_count": 25,
+            "schema_version": "1.0",
+            "data_source": "demo"
+        })
+        
+    except Exception as e:
+        logger.error(f"💥 ML model data error: {e}")
+        return jsonify({"error": str(e)})
+
+
 
 @app.route('/api/portfolio')
 @auth.login_required
@@ -1586,7 +1809,22 @@ def api_equity_curve():
 @limiter.limit("30 per minute")
 def api_bot_status():
     """API endpoint for bot status"""
-    return jsonify(data_processor.get_bot_status())
+    client_ip = get_remote_address()
+    security_logger.info(f"API access: bot-status from {client_ip}")
+    
+    try:
+        # Try to get data from Pi logs first
+        if pi_api_client.check_pi_connectivity():
+            pi_data = pi_api_client.get_bot_status_data()
+            if not pi_data.get("error"):
+                return jsonify(pi_data)
+        
+        # Fallback to data processor
+        return jsonify(data_processor.get_bot_status())
+        
+    except Exception as e:
+        logger.error(f"💥 Bot status error: {e}")
+        return jsonify({"error": str(e)})
 
 
 @app.route('/api/sync-status')
