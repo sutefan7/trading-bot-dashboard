@@ -354,3 +354,4 @@ tail -f logs/server.log
 ---
 
 *Deze architectuur documentatie wordt regelmatig bijgewerkt met nieuwe features en verbeteringen.*
+

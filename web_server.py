@@ -1838,6 +1838,7 @@ def api_sync_status():
 @app.route('/api/sync-now', methods=['POST'])
 @auth.login_required
 @limiter.limit("5 per minute")
+@csrf.exempt  # Manual sync doesn't need CSRF protection
 def api_sync_now():
     """
     API endpoint to trigger manual sync

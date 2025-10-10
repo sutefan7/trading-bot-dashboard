@@ -409,3 +409,4 @@ class FallbackManager:
         """Disable fallback system"""
         self.fallback_enabled = False
         logger.info("❌ Fallback system disabled")
+

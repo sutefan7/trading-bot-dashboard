@@ -688,3 +688,4 @@ class HealthMonitor:
             "last_check": self.last_health_check.isoformat() if self.last_health_check else None,
             "health_history_count": len(self.health_history)
         }
+
