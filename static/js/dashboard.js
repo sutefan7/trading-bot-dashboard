@@ -541,8 +541,36 @@ async function loadAllData() {
         // Start data freshness timer
         startDataFreshnessTimer();
         
+        // Update system panel (API status, freshness, memory) from health endpoint
+        updateSystemPanelFromHealth();
+        
         console.log('✅ Dashboard data loaded');
     });
+}
+
+/**
+ * Update system panel values from /api/health
+ */
+async function updateSystemPanelFromHealth() {
+    try {
+        const res = await fetch('/api/health');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const h = await res.json();
+        
+        // API status
+        utils.safeUpdateElement('api-status', 'Online');
+        
+        // Data freshness (minutes since last sync in state)
+        utils.safeUpdateElement('data-freshness', `${state.dataFreshnessMin} min`);
+        
+        // Memory usage (cache usage %) if available
+        const size = h?.cache?.size ?? 0;
+        const max = h?.cache?.max_size ?? 0;
+        const usage = max > 0 ? Math.round((size / max) * 100) : 0;
+        utils.safeUpdateElement('memory-usage', max > 0 ? `${usage}%` : '—');
+    } catch (e) {
+        utils.safeUpdateElement('api-status', 'Offline');
+    }
 }
 
 /**
@@ -632,10 +660,7 @@ Object.assign(ui, {
             'open-positions-detail': data.open_positions,
             'portfolio-pnl': utils.formatCurrency(data.total_pnl),
             'win-rate': utils.formatPercent(data.win_rate || 0),
-            'sharpe-ratio': (data.sharpe_ratio || 0).toFixed(1),
-            'api-status': 'Connected',
-            'data-freshness': '2 min',
-            'memory-usage': '65%'
+            'sharpe-ratio': (data.sharpe_ratio || 0).toFixed(1)
         });
     },
     
@@ -1583,7 +1608,7 @@ Object.assign(ui, {
         renderKpi(document.getElementById('kpi-risk'), {
             key: 'risk',
             label: '⚠️ Risico Score',
-            value: data.risk_score || 3.5,
+            value: data.risk_score || 0,
             fmt: v => v.toFixed(1)
         });
     }

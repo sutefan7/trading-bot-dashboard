@@ -13,11 +13,13 @@ from pathlib import Path
 import logging
 from typing import Dict, List, Optional
 
-# Configuration
-PI_HOST = "stephang@192.168.1.104"
-PI_PATH = "/home/stephang/trading-bot-v4/storage/reports"
-LOCAL_DATA_DIR = Path(__file__).parent / "data"
-SYNC_INTERVAL_MINUTES = 5
+from config import Config
+
+# Configuration (centralized via Config)
+PI_HOST = Config.PI_HOST
+PI_PATH = Config.PI_PATH  # e.g. /srv/trading-bot-pi/app/storage/reports
+LOCAL_DATA_DIR = Config.DATA_DIR
+SYNC_INTERVAL_MINUTES = Config.SYNC_INTERVAL_MINUTES
 
 # Setup logging
 logging.basicConfig(
@@ -43,6 +45,7 @@ class DataSyncManager:
         self.failure_count = 0
         self.last_success = None
         self.last_failure = None
+        self.last_error = None
     
     def check_pi_connectivity(self) -> bool:
         """Check if Pi is reachable before attempting sync"""
@@ -105,6 +108,7 @@ class DataSyncManager:
                 self.sync_status = "success"
                 self.success_count += 1
                 self.last_success = datetime.now()
+                self.last_error = None
                 logger.info("✅ Data sync successful")
                 
                 # Process and validate synced files
@@ -114,19 +118,22 @@ class DataSyncManager:
                 self.sync_status = "failed"
                 self.failure_count += 1
                 self.last_failure = datetime.now()
-                logger.error(f"❌ SCP failed: {result.stderr}")
+                self.last_error = result.stderr.strip() or result.stdout.strip()
+                logger.error(f"❌ SCP failed: {self.last_error}")
                 return False
                 
         except subprocess.TimeoutExpired:
             self.sync_status = "timeout"
             self.failure_count += 1
             self.last_failure = datetime.now()
+            self.last_error = "SCP timeout"
             logger.error("⏰ SCP timeout - Pi may be offline")
             return False
         except Exception as e:
             self.sync_status = "error"
             self.failure_count += 1
             self.last_failure = datetime.now()
+            self.last_error = str(e)
             logger.error(f"💥 Sync error: {e}")
             return False
     
@@ -189,7 +196,8 @@ class DataSyncManager:
             "failure_count": self.failure_count,
             "success_rate": round(success_rate, 2),
             "last_success": self.last_success.isoformat() if self.last_success else None,
-            "last_failure": self.last_failure.isoformat() if self.last_failure else None
+            "last_failure": self.last_failure.isoformat() if self.last_failure else None,
+            "last_error": self.last_error
         }
     
     def get_available_data_files(self) -> List[Dict]:

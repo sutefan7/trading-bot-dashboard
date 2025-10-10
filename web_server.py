@@ -297,28 +297,43 @@ class DataProcessor:
             winning_trades = df.get('winning_trades', pd.Series([0])).iloc[-1] if len(df) > 0 else 0
             losing_trades = df.get('losing_trades', pd.Series([0])).iloc[-1] if len(df) > 0 else 0
             win_rate = df.get('win_rate', pd.Series([0])).iloc[-1] if len(df) > 0 else 0
-            
-            # Get PnL from equity data or use start capital
-            total_pnl = 0  # Will be updated from equity data
-            avg_win = 0    # Will be calculated from equity data
-            avg_loss = 0   # Will be calculated from equity data
-            
-            # If no trades yet, show demo data with start capital
-            if total_trades == 0:
-                start_capital = 1000.0
-                total_pnl = 0.0  # No P&L yet
-            
+
+            # Derive P&L from equity.csv when available
+            total_pnl = 0.0
+            try:
+                equity_file = self.data_dir / "equity.csv"
+                if equity_file.exists():
+                    df_equity = pd.read_csv(equity_file, dtype={
+                        'timestamp': 'string',
+                        'balance': 'float64',
+                        'pnl': 'float64'
+                    }, na_values=["", "N/A", "nan", None])
+                    if len(df_equity) > 0:
+                        if 'pnl' in df_equity.columns and not df_equity['pnl'].isna().all():
+                            total_pnl = float(df_equity['pnl'].iloc[-1] or 0.0)
+                        elif 'balance' in df_equity.columns and not df_equity['balance'].isna().all():
+                            balances = df_equity['balance'].dropna().tolist()
+                            if len(balances) >= 2:
+                                total_pnl = float(balances[-1] - balances[0])
+            except Exception:
+                total_pnl = 0.0
+
+            # Placeholders for advanced metrics when not provided
+            avg_win = 0.0
+            avg_loss = 0.0
+            profit_factor = float(abs(avg_win / avg_loss)) if avg_loss != 0 else 0.0
+
             return {
                 "total_trades": int(total_trades) if total_trades is not None else 0,
                 "winning_trades": int(winning_trades) if winning_trades is not None else 0,
                 "losing_trades": int(losing_trades) if losing_trades is not None else 0,
                 "win_rate": float(win_rate) if win_rate is not None else 0.0,
-                "total_pnl": float(total_pnl) if total_pnl is not None else 0.0,
-                "avg_win": float(avg_win) if avg_win is not None else 0.0,
-                "avg_loss": float(avg_loss) if avg_loss is not None else 0.0,
-                "profit_factor": float(abs(avg_win / avg_loss)) if avg_loss != 0 and avg_loss is not None else 0.0,
-                "demo_mode": True,  # Indicate this is demo data
-                "start_capital": 1000.0
+                "total_pnl": float(total_pnl),
+                "avg_win": float(avg_win),
+                "avg_loss": float(avg_loss),
+                "profit_factor": profit_factor,
+                "demo_mode": False,
+                "data_source": "csv_local"
             }
             
         except Exception as e:
@@ -1541,6 +1556,7 @@ def health_check():
 
 
 @app.route('/api/pi-sync', methods=['POST'])
+@csrf.exempt
 @auth.login_required
 @limiter.limit("5 per minute")
 def api_pi_sync():
@@ -1728,6 +1744,7 @@ def api_stats():
 
 
 @app.route('/api/cache/clear', methods=['POST'])
+@csrf.exempt
 @auth.login_required
 @limiter.limit("5 per minute")
 def api_clear_cache():
@@ -1836,9 +1853,9 @@ def api_sync_status():
 
 
 @app.route('/api/sync-now', methods=['POST'])
+@csrf.exempt
 @auth.login_required
 @limiter.limit("5 per minute")
-@csrf.exempt  # Manual sync doesn't need CSRF protection
 def api_sync_now():
     """
     API endpoint to trigger manual sync
@@ -1976,6 +1993,7 @@ def api_backup_list():
 
 
 @app.route('/api/backup/create', methods=['POST'])
+@csrf.exempt
 @auth.login_required
 @limiter.limit("2 per hour")
 def api_backup_create():
@@ -2009,6 +2027,7 @@ def api_backup_create():
 
 
 @app.route('/api/backup/restore', methods=['POST'])
+@csrf.exempt
 @auth.login_required
 @limiter.limit("1 per hour")
 def api_backup_restore():
