@@ -5,22 +5,23 @@ Run with: python3 test_dashboard.py
 """
 import unittest
 import tempfile
+import shutil
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
 
 from config import Config, TestConfig
 from database import DatabaseManager
-from cache import SimpleCache, cached
+from cache import AdvancedCache as SimpleCache, cached
+from pi_api_client import PiAPIClient
 
 
-class TestConfig(unittest.TestCase):
+class TestConfigManagement(unittest.TestCase):
     """Test configuration management"""
-    
+
     def test_config_validation(self):
         """Test configuration validation"""
-        config = TestConfig()
-        is_valid, errors = config.validate_config()
+        is_valid, errors = Config.validate_config()
         self.assertTrue(is_valid or len(errors) > 0)
     
     def test_private_ip_detection(self):
@@ -37,18 +38,18 @@ class TestConfig(unittest.TestCase):
 
 class TestDatabase(unittest.TestCase):
     """Test database operations"""
-    
+
     def setUp(self):
         """Create temporary database for testing"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / 'test.db'
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / 'test.db'
         self.db = DatabaseManager(self.db_path)
-    
+
     def tearDown(self):
         """Clean up test database"""
         if self.db_path.exists():
             self.db_path.unlink()
-        Path(self.temp_dir).rmdir()
+        shutil.rmtree(self.temp_dir.name, ignore_errors=True)
     
     def test_database_initialization(self):
         """Test database is initialized correctly"""
@@ -81,7 +82,7 @@ class TestDatabase(unittest.TestCase):
     
     def test_database_backup(self):
         """Test database backup"""
-        backup_path = Path(self.temp_dir) / 'backup.db'
+        backup_path = Path(self.temp_dir.name) / 'backup.db'
         success = self.db.backup(backup_path)
         self.assertTrue(success)
         self.assertTrue(backup_path.exists())
@@ -139,6 +140,60 @@ class TestCache(unittest.TestCase):
         self.assertEqual(call_count[0], 1)  # Not incremented
 
 
+class TestPiAPILocalMode(unittest.TestCase):
+    """Test Pi API client behaviour in local mode"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_path = Path(self.temp_dir.name)
+        (self.temp_path / 'logs').mkdir(parents=True, exist_ok=True)
+
+        (self.temp_path / 'logs' / 'trading_bot.log').write_text(
+            "BOT LOG LINE 1\nBOT LOG LINE 2\nBOT LOG LINE 3\n",
+            encoding='utf-8'
+        )
+        (self.temp_path / 'logs' / 'signals.log').write_text(
+            "Signal: BUY\nSignal: SELL\n",
+            encoding='utf-8'
+        )
+        (self.temp_path / 'logs' / 'errors.log').write_text(
+            "Error: data_manager failure\nError: scheduler hiccup\n",
+            encoding='utf-8'
+        )
+
+        self.prev_local_mode = Config.PI_LOCAL_MODE
+        self.prev_local_path = Config.LOCAL_PI_APP_PATH
+        Config.PI_LOCAL_MODE = True
+        Config.LOCAL_PI_APP_PATH = self.temp_path
+
+        self.client = PiAPIClient()
+
+    def tearDown(self):
+        Config.PI_LOCAL_MODE = self.prev_local_mode
+        Config.LOCAL_PI_APP_PATH = self.prev_local_path
+        self.temp_dir.cleanup()
+
+    def test_local_tail_reads_logs(self):
+        success, stdout, stderr = self.client.execute_ssh_command(
+            f"tail -5 {Config.PI_APP_PATH}/logs/trading_bot.log"
+        )
+        self.assertTrue(success)
+        self.assertIn('BOT LOG LINE 3', stdout)
+
+        bot_status = self.client.get_bot_status_data()
+        self.assertIn('recent_logs', bot_status)
+        self.assertTrue(bot_status['recent_logs'])
+        self.assertNotIn('file not found', ' '.join(bot_status['recent_logs']).lower())
+
+        signals_data = self.client.get_signals_data()
+        self.assertTrue(signals_data['signals'])
+        self.assertNotIn('file not found', ' '.join(signals_data['signals']).lower())
+
+        errors_data = self.client.get_errors_data()
+        self.assertTrue(errors_data['errors'])
+        self.assertNotIn('file not found', ' '.join(errors_data['errors']).lower())
+
+
 class TestSecurityValidator(unittest.TestCase):
     """Test security validation"""
     
@@ -165,9 +220,10 @@ def run_tests():
     suite = unittest.TestSuite()
     
     # Add test cases
-    suite.addTests(loader.loadTestsFromTestCase(TestConfig))
+    suite.addTests(loader.loadTestsFromTestCase(TestConfigManagement))
     suite.addTests(loader.loadTestsFromTestCase(TestDatabase))
     suite.addTests(loader.loadTestsFromTestCase(TestCache))
+    suite.addTests(loader.loadTestsFromTestCase(TestPiAPILocalMode))
     
     # Run tests
     runner = unittest.TextTestRunner(verbosity=2)
