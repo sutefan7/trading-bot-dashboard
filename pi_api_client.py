@@ -8,6 +8,7 @@ import subprocess
 import json
 import time
 import logging
+import shlex
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -60,29 +61,48 @@ class PiAPIClient:
         """Execute SSH command on Pi"""
         try:
             if self.local_mode and self.local_app_path.exists():
-                # Simulate common commands by reading local files
+                def _resolve_local_path(raw_path: str) -> Path:
+                    cleaned = raw_path.strip().strip("'\"")
+                    path = Path(cleaned)
+                    if path.is_absolute():
+                        try:
+                            rel = path.relative_to(Path(self.pi_app_path))
+                            return self.local_app_path / rel
+                        except ValueError:
+                            return path
+                    return self.local_app_path / path
+
                 try:
                     if command.startswith('cat '):
-                        rel = command.split('cat ',1)[1].strip()
-                        path = Path(rel)
-                        if not path.is_absolute():
-                            path = self.local_app_path / path
+                        target = command.split('cat ', 1)[1].strip()
+                        path = _resolve_local_path(target)
                         if path.exists():
                             return True, path.read_text(encoding='utf-8', errors='ignore'), ''
                         return False, '', 'file not found'
-                    if command.startswith('tail -'):
-                        # naive tail implementation: read and take last N lines
-                        parts = command.split()
+                    if command.startswith('tail'):
+                        parts = shlex.split(command)
+                        # Default to tail -10 behaviour similar to command line
                         n = 10
-                        for i,p in enumerate(parts):
-                            if p.startswith('-') and p[1:].isdigit():
-                                n = int(p[1:])
-                        filep = parts[-1]
-                        path = self.local_app_path / filep if not filep.startswith('/') else Path(filep)
-                        if path.exists():
-                            lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
-                            return True, '\n'.join(lines[-n:]), ''
-                        return False, '', 'file not found'
+                        filep = None
+                        for idx, part in enumerate(parts[1:], start=1):
+                            if part.startswith('-') and part[1:].isdigit():
+                                n = int(part[1:])
+                            elif part in {'-n', '--lines'} and idx + 1 < len(parts):
+                                try:
+                                    n = int(parts[idx + 1])
+                                except ValueError:
+                                    pass
+                            else:
+                                filep = part
+                        if not filep and parts:
+                            filep = parts[-1]
+                        if filep:
+                            path = _resolve_local_path(filep)
+                            if path.exists():
+                                lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
+                                return True, '\n'.join(lines[-n:]), ''
+                            return False, '', 'file not found'
+                    return False, '', 'local mode: command not supported'
                 except Exception as e:
                     return False, '', str(e)
             full_command = f"ssh -o ConnectTimeout={self.timeout} -o StrictHostKeyChecking=yes {self.pi_host} '{command}'"
