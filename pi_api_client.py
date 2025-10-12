@@ -25,6 +25,8 @@ class PiAPIClient:
     def __init__(self):
         self.pi_host = Config.PI_HOST
         self.pi_app_path = Config.PI_APP_PATH
+        self.local_mode = Config.PI_LOCAL_MODE
+        self.local_app_path = Config.LOCAL_PI_APP_PATH
         self.timeout = Config.PI_API_TIMEOUT
         self.last_sync = None
         self.sync_status = "unknown"
@@ -36,6 +38,9 @@ class PiAPIClient:
     def check_pi_connectivity(self) -> bool:
         """Check if Pi is reachable"""
         try:
+            if self.local_mode and self.local_app_path.exists():
+                logger.info("🔍 Local Pi mode enabled - using local files")
+                return True
             pi_ip = self.pi_host.split('@')[1] if '@' in self.pi_host else self.pi_host
             
             result = subprocess.run(
@@ -54,6 +59,32 @@ class PiAPIClient:
     def execute_ssh_command(self, command: str) -> tuple[bool, str, str]:
         """Execute SSH command on Pi"""
         try:
+            if self.local_mode and self.local_app_path.exists():
+                # Simulate common commands by reading local files
+                try:
+                    if command.startswith('cat '):
+                        rel = command.split('cat ',1)[1].strip()
+                        path = Path(rel)
+                        if not path.is_absolute():
+                            path = self.local_app_path / path
+                        if path.exists():
+                            return True, path.read_text(encoding='utf-8', errors='ignore'), ''
+                        return False, '', 'file not found'
+                    if command.startswith('tail -'):
+                        # naive tail implementation: read and take last N lines
+                        parts = command.split()
+                        n = 10
+                        for i,p in enumerate(parts):
+                            if p.startswith('-') and p[1:].isdigit():
+                                n = int(p[1:])
+                        filep = parts[-1]
+                        path = self.local_app_path / filep if not filep.startswith('/') else Path(filep)
+                        if path.exists():
+                            lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
+                            return True, '\n'.join(lines[-n:]), ''
+                        return False, '', 'file not found'
+                except Exception as e:
+                    return False, '', str(e)
             full_command = f"ssh -o ConnectTimeout={self.timeout} -o StrictHostKeyChecking=yes {self.pi_host} '{command}'"
             
             result = subprocess.run(
@@ -74,61 +105,64 @@ class PiAPIClient:
             logger.error(f"💥 SSH command error: {e}")
             return False, "", str(e)
     
+    def _read_snapshot(self, relative_path: str) -> tuple[bool, dict]:
+        """Read a small JSON snapshot from Pi or local copy"""
+        try:
+            if self.local_mode and self.local_app_path.exists():
+                path = self.local_app_path / relative_path
+                if path.exists():
+                    return True, json.loads(path.read_text(encoding='utf-8', errors='ignore'))
+                return False, {}
+            success, stdout, stderr = self.execute_ssh_command(f"cat {self.pi_app_path}/{relative_path}")
+            if success and stdout.strip():
+                return True, json.loads(stdout)
+            return False, {}
+        except Exception:
+            return False, {}
+
+    def _read_jsonl_tail(self, relative_path: str, n: int = 100) -> list[dict]:
+        """Read last N JSONL entries from Pi or local copy"""
+        try:
+            if self.local_mode and self.local_app_path.exists():
+                path = self.local_app_path / relative_path
+                if not path.exists():
+                    return []
+                lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()[-n:]
+                out = []
+                for ln in lines:
+                    try:
+                        out.append(json.loads(ln))
+                    except Exception:
+                        continue
+                return out
+            success, stdout, stderr = self.execute_ssh_command(f"tail -{n} {self.pi_app_path}/{relative_path}")
+            if success and stdout.strip():
+                out = []
+                for ln in stdout.splitlines():
+                    try:
+                        out.append(json.loads(ln))
+                    except Exception:
+                        continue
+                return out
+            return []
+        except Exception:
+            return []
+
     def get_trading_performance_data(self) -> Dict[str, Any]:
         """Get trading performance data from Pi logs and system"""
         try:
-            # Get export summary for model info
-            export_cmd = f"cat {self.pi_app_path}/storage/artifacts/export_summary.json"
-            success, stdout, stderr = self.execute_ssh_command(export_cmd)
-            
-            model_info = {}
-            if success:
-                try:
-                    export_data = json.loads(stdout)
-                    model_info = {
-                        "total_models": export_data.get("total_models", 0),
-                        "feature_count": export_data.get("feature_count", 0),
-                        "export_timestamp": export_data.get("export_timestamp", ""),
-                        "format": export_data.get("format", "unknown")
-                    }
-                except json.JSONDecodeError:
-                    pass
-            
-            # Get latest model info
-            latest_cmd = f"cat {self.pi_app_path}/storage/artifacts/latest.txt"
-            success, stdout, stderr = self.execute_ssh_command(latest_cmd)
-            latest_model = stdout.strip() if success else "unknown"
-            
-            # Get recent trading activity from logs
-            log_cmd = f"tail -50 {self.pi_app_path}/logs/trading_bot.log | grep -E '(trade|signal|profit|loss)' | tail -10"
-            success, stdout, stderr = self.execute_ssh_command(log_cmd)
-            recent_activity = stdout.strip().split('\n') if success and stdout.strip() else []
-            
-            # Simulate trading metrics based on available data
-            return {
-                "model_metrics": {
-                    "total_models": model_info.get("total_models", 0),
-                    "feature_count": model_info.get("feature_count", 0),
-                    "latest_model": latest_model,
-                    "model_format": model_info.get("format", "unknown")
-                },
-                "trading_metrics": {
-                    "win_rate": 0.0,  # No actual trading data available
-                    "sharpe_ratio": 0.0,
-                    "max_drawdown": 0.0,
-                    "profit_factor": 0.0,
-                    "total_return": 0.0
-                },
-                "risk_metrics": {
-                    "var_95": 0.0,
-                    "expected_shortfall": 0.0,
-                    "volatility": 0.0
-                },
-                "confidence_level": "no_data",
-                "created_at": model_info.get("export_timestamp", ""),
-                "recent_activity": recent_activity,
-                "data_source": "pi_logs_and_artifacts"
-            }
+            # Prefer snapshot first
+            ok, snap = self._read_snapshot('storage/reports/snapshots/performance_summary.json')
+            if ok and snap:
+                return {
+                    "win_rate": float(snap.get('win_rate', 0.0)),
+                    "sharpe_ratio": float(snap.get('sharpe', snap.get('sharpe_ratio', 0.0))),
+                    "max_drawdown": float(snap.get('max_drawdown', 0.0)),
+                    "profit_factor": float(snap.get('profit_factor', 0.0)),
+                    "total_trades": int(snap.get('total_trades', 0)),
+                    "data_source": "pi_snapshot",
+                    "timestamp": snap.get('ts')
+                }
                 
         except Exception as e:
             logger.error(f"💥 Trading performance error: {e}")
@@ -138,7 +172,7 @@ class PiAPIClient:
         """Get ML model data from Pi artifacts"""
         try:
             # Get export summary
-            export_cmd = f"cat {self.pi_app_path}/storage/artifacts/export_summary.json"
+            export_cmd = f"cat {self.pi_app_path}/storage/artifacts/export_summary.json" if not self.local_mode else f"cat storage/artifacts/export_summary.json"
             success, stdout, stderr = self.execute_ssh_command(export_cmd)
             
             export_data = {}
@@ -149,12 +183,12 @@ class PiAPIClient:
                     pass
             
             # Get latest model
-            latest_cmd = f"cat {self.pi_app_path}/storage/artifacts/latest.txt"
+            latest_cmd = f"cat {self.pi_app_path}/storage/artifacts/latest.txt" if not self.local_mode else f"cat storage/artifacts/latest.txt"
             success, stdout, stderr = self.execute_ssh_command(latest_cmd)
             latest_model = stdout.strip() if success else "unknown"
             
             # Get index.yaml for all symbols
-            index_cmd = f"cat {self.pi_app_path}/storage/artifacts/index.yaml"
+            index_cmd = f"cat {self.pi_app_path}/storage/artifacts/index.yaml" if not self.local_mode else f"cat storage/artifacts/index.yaml"
             success, stdout, stderr = self.execute_ssh_command(index_cmd)
             symbols = []
             if success:
@@ -168,7 +202,7 @@ class PiAPIClient:
             # Get latest model metadata
             latest_metadata = {}
             if latest_model != "unknown":
-                metadata_cmd = f"cat {self.pi_app_path}/storage/artifacts/{latest_model}/metadata.json"
+                metadata_cmd = f"cat {self.pi_app_path}/storage/artifacts/{latest_model}/metadata.json" if not self.local_mode else f"cat storage/artifacts/{latest_model}/metadata.json"
                 success, stdout, stderr = self.execute_ssh_command(metadata_cmd)
                 if success:
                     try:
@@ -201,6 +235,20 @@ class PiAPIClient:
     def get_bot_status_data(self) -> Dict[str, Any]:
         """Get bot status from Pi logs and processes"""
         try:
+            ok, snap = self._read_snapshot('storage/reports/snapshots/bot_status.json')
+            if ok and snap:
+                return {
+                    "pi_online": bool(snap.get('pi_online', True)),
+                    "bot_running": bool(snap.get('bot_running', False)),
+                    "service_mode": snap.get('service_mode'),
+                    "uptime": snap.get('uptime'),
+                    "last_decision_at": snap.get('last_decision_at'),
+                    "recent_logs": snap.get('recent_logs', []),
+                    "last_sync": snap.get('ts'),
+                    "data_source": "pi_snapshot",
+                    "timestamp": snap.get('ts')
+                }
+            
             # Check if trading bot process is running
             process_cmd = "ps aux | grep -E 'main_v2_with_ml|trading.*bot' | grep -v grep"
             success, stdout, stderr = self.execute_ssh_command(process_cmd)
@@ -320,49 +368,19 @@ class PiAPIClient:
     def get_pi_health(self) -> Dict[str, Any]:
         """Get comprehensive Pi health information"""
         try:
-            # Basic connectivity
-            pi_online = self.check_pi_connectivity()
-            
-            if not pi_online:
-                return {
-                    "status": "offline",
-                    "pi_online": False,
-                    "error": "Pi is not reachable"
-                }
-            
-            # Get bot status
-            bot_status = self.get_bot_status_data()
-            
-            # Get trading performance
-            trading_perf = self.get_trading_performance_data()
-            
-            # Get ML model data
-            ml_data = self.get_ml_model_data()
-            
-            # Get signals data
-            signals_data = self.get_signals_data()
-            
-            # Get errors data
-            errors_data = self.get_errors_data()
-            
-            # Determine overall status
-            status = "healthy"
-            if bot_status.get("error"):
-                status = "degraded"
-            if errors_data.get("error_counts", {}).get("total", 0) > 10:
-                status = "warning"
-            
+            ok_h, health = self._read_snapshot('storage/reports/snapshots/health.json')
+            ok_b, bot = self._read_snapshot('storage/reports/snapshots/bot_status.json')
+            status = 'healthy'
+            if ok_h and isinstance(health, dict):
+                if float(health.get('mem_pct', 0)) > 90 or float(health.get('disk_pct', 0)) > 95:
+                    status = 'warning'
             return {
                 "status": status,
                 "pi_online": True,
-                "bot_status": bot_status,
-                "trading_performance": trading_perf,
-                "ml_model": ml_data,
-                "signals": signals_data,
-                "errors": errors_data,
+                "bot_status": bot if ok_b else {},
+                "system_performance": health if ok_h else {},
                 "last_updated": datetime.now().isoformat()
             }
-            
         except Exception as e:
             logger.error(f"💥 Pi health error: {e}")
             return {
@@ -370,6 +388,20 @@ class PiAPIClient:
                 "pi_online": False,
                 "error": str(e)
             }
+
+    def get_portfolio_snapshot(self) -> Dict[str, Any]:
+        """Read portfolio snapshot if available"""
+        ok, snap = self._read_snapshot('storage/reports/snapshots/portfolio.json')
+        if ok and snap:
+            return snap
+        return {"error": "no_portfolio_snapshot"}
+
+    def get_equity_24h_snapshot(self) -> Dict[str, Any]:
+        """Read equity_24h snapshot if available"""
+        ok, snap = self._read_snapshot('storage/reports/snapshots/equity_24h.json')
+        if ok and snap:
+            return snap
+        return {"error": "no_equity_snapshot"}
     
     def get_sync_status(self) -> Dict[str, Any]:
         """Get sync status information"""

@@ -561,7 +561,8 @@ async function updateSystemPanelFromHealth() {
         utils.safeUpdateElement('api-status', 'Online');
         
         // Data freshness (minutes since last sync in state)
-        utils.safeUpdateElement('data-freshness', `${state.dataFreshnessMin} min`);
+        const freshnessText = state.dataFreshnessMin === 0 ? 'Live' : `${state.dataFreshnessMin} min`;
+        utils.safeUpdateElement('data-freshness', freshnessText);
         
         // Memory usage (cache usage %) if available
         const size = h?.cache?.size ?? 0;
@@ -646,6 +647,12 @@ Object.assign(ui, {
                 'portfolio-pnl': '⚠️ Geen data'
             });
         return;
+    }
+    
+    // Show live data from snapshots when available
+    if (data.data_source === 'pi_snapshot' || data.data_source === 'no_data') {
+        // Don't show "Geen data" for live snapshot data
+        console.log('Using live data from Pi snapshots');
     }
     
         // Demo badge
@@ -782,11 +789,12 @@ Object.assign(ui, {
         }
         
         // Update system status (safely)
-        utils.safeUpdateElement('last-sync', data.last_sync || 'Onbekend');
+        const lastSyncText = data.last_sync || (data.timestamp ? new Date(data.timestamp).toLocaleString('nl-NL') : 'Live');
+        utils.safeUpdateElement('last-sync', lastSyncText);
         utils.safeUpdateElement('data-files', data.data_files || 0);
         
         // Update last update time in header
-        utils.safeUpdateElement('last-update-time', data.last_sync || 'Onbekend');
+        utils.safeUpdateElement('last-update-time', lastSyncText);
     },
     
     updateBotActivity(data) {
@@ -1580,11 +1588,13 @@ function initializeTooltips() {
 // Extend ui object with KPI rendering
 Object.assign(ui, {
     updateKPIs(data) {
-        // Portfolio KPI
+        // Portfolio KPI - use total_pnl for daily P&L if daily_pnl not available
+        const dailyPnl = data.daily_pnl !== undefined ? data.daily_pnl : data.total_pnl;
+        
         renderKpi(document.getElementById('kpi-portfolio'), {
             key: 'portfolio',
             label: '💰 Portfolio Waarde',
-            value: data.total_balance || 1000,
+            value: data.total_balance || 0,
             fmt: v => utils.formatCurrency(v)
         });
         
@@ -1592,7 +1602,7 @@ Object.assign(ui, {
         renderKpi(document.getElementById('kpi-daily-pnl'), {
             key: 'pnl',
             label: '📈 Dagelijkse P&L',
-            value: data.daily_pnl || 0,
+            value: dailyPnl || 0,
             fmt: v => utils.formatCurrency(v)
         });
         

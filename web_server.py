@@ -261,10 +261,14 @@ class DataProcessor:
             pi_online = pi_api_client.check_pi_connectivity()
             
             if pi_online:
-                # Try to get data from Pi artifacts first
+                # Prefer Pi snapshots first
                 pi_data = pi_api_client.get_trading_performance_data()
+                if not pi_data.get("error") and pi_data.get('data_source') == 'pi_snapshot':
+                    logger.info("✅ Using Pi snapshot for trading performance")
+                    return pi_data
+                # Fallback to previous artifacts-based approach inside client
                 if not pi_data.get("error"):
-                    logger.info("✅ Using Pi artifacts data for trading performance")
+                    logger.info("✅ Using Pi artifacts/logs data for trading performance")
                     return pi_data
             
             # Check if fallback is needed
@@ -344,14 +348,60 @@ class DataProcessor:
     def get_portfolio_overview(self) -> dict:
         """Get comprehensive portfolio overview with advanced metrics"""
         try:
-            # Look for portfolio file
+            # Prefer Pi snapshot if available
+            try:
+                if pi_api_client.check_pi_connectivity():
+                    snap = pi_api_client.get_portfolio_snapshot()
+                    if not snap.get('error'):
+                        return {
+                            "total_balance": float(snap.get('balance_eur', 0.0)),
+                            "available_balance": float(snap.get('balance_eur', 0.0)),
+                            "total_pnl": float(snap.get('pnl_eur', 0.0)),
+                            "realized_pnl": float(snap.get('realized_pnl_eur', 0.0)) if 'realized_pnl_eur' in snap else 0.0,
+                            "unrealized_pnl": float(snap.get('unrealized_pnl_eur', 0.0)) if 'unrealized_pnl_eur' in snap else 0.0,
+                            "open_positions": int(snap.get('open_positions', 0)),
+                            "win_rate": float((snap.get('metrics', {}) or {}).get('win_rate', 0.0)),
+                            "sharpe_ratio": float((snap.get('metrics', {}) or {}).get('sharpe', 0.0)),
+                            "last_updated": snap.get('ts'),
+                            "demo_mode": False,
+                            "data_source": "pi_snapshot"
+                        }
+            except Exception:
+                pass
+            # Look for portfolio file (fallback)
             portfolio_file = self.data_dir / "portfolio.csv"
             if not portfolio_file.exists():
-                return {"error": "No portfolio data available"}
+                # Return empty portfolio instead of error when no CSV available
+                return {
+                    "total_balance": 0.0,
+                    "available_balance": 0.0,
+                    "total_pnl": 0.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "open_positions": 0,
+                    "win_rate": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "last_updated": None,
+                    "demo_mode": True,
+                    "data_source": "no_data"
+                }
             
             # Validate file security
             if not SecurityValidator.validate_csv_file(portfolio_file):
-                return {"error": "Invalid portfolio data file"}
+                # Return empty portfolio instead of error for invalid CSV
+                return {
+                    "total_balance": 0.0,
+                    "available_balance": 0.0,
+                    "total_pnl": 0.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "open_positions": 0,
+                    "win_rate": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "last_updated": None,
+                    "demo_mode": True,
+                    "data_source": "invalid_csv"
+                }
             
             df = pd.read_csv(portfolio_file, dtype={
                 'symbol': 'string',
@@ -364,7 +414,20 @@ class DataProcessor:
             
             # Validate data structure
             if not SecurityValidator.validate_csv_data(df, ALLOWED_CSV_COLUMNS['portfolio.csv']):
-                return {"error": "Invalid portfolio data structure"}
+                # Return empty portfolio instead of error for invalid structure
+                return {
+                    "total_balance": 0.0,
+                    "available_balance": 0.0,
+                    "total_pnl": 0.0,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "open_positions": 0,
+                    "win_rate": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "last_updated": None,
+                    "demo_mode": True,
+                    "data_source": "invalid_structure"
+                }
             
             # Get latest portfolio data
             latest = df.iloc[-1] if len(df) > 0 else {}
@@ -426,14 +489,51 @@ class DataProcessor:
     def get_portfolio_details(self) -> dict:
         """Get detailed portfolio holdings"""
         try:
-            # Look for portfolio file
+            # Prefer Pi snapshot positions if available
+            try:
+                if pi_api_client.check_pi_connectivity():
+                    snap = pi_api_client.get_portfolio_snapshot()
+                    if not snap.get('error'):
+                        holdings = []
+                        for p in (snap.get('positions') or []):
+                            holdings.append({
+                                "symbol": p.get('symbol'),
+                                "side": p.get('side'),
+                                "quantity_requested": p.get('qty', 0),
+                                "quantity_filled": p.get('qty', 0),
+                                "status": p.get('status', 'open'),
+                                "pnl": p.get('pnl_eur', 0.0),
+                                "balance": p.get('balance_eur', 0.0),
+                                "percentage": p.get('weight_pct', 0.0)
+                            })
+                        return {
+                            "holdings": holdings,
+                            "total_balance": snap.get('balance_eur', 0.0),
+                            "total_holdings": len(holdings),
+                            "last_updated": snap.get('ts')
+                        }
+            except Exception:
+                pass
+            # Look for portfolio file (fallback)
             portfolio_file = self.data_dir / "portfolio.csv"
             if not portfolio_file.exists():
-                return {"error": "No portfolio data available"}
+                # Return empty holdings instead of error when no CSV available
+                return {
+                    "holdings": [],
+                    "total_balance": 0.0,
+                    "total_holdings": 0,
+                    "last_updated": None
+                }
             
             # Validate file security
             if not SecurityValidator.validate_csv_file(portfolio_file):
-                return {"error": "Invalid portfolio data file"}
+                # Return empty holdings instead of error for invalid CSV
+                return {
+                    "holdings": [],
+                    "total_balance": 0.0,
+                    "total_holdings": 0,
+                    "last_updated": None
+                }
             
             df = pd.read_csv(portfolio_file, dtype={
                 'symbol': 'string',
@@ -502,6 +602,23 @@ class DataProcessor:
     def get_equity_curve(self) -> dict:
         """Get equity curve data for charts"""
         try:
+            # Prefer Pi snapshot if available
+            try:
+                if pi_api_client.check_pi_connectivity():
+                    snap = pi_api_client.get_equity_24h_snapshot()
+                    if not snap.get('error'):
+                        pts = snap.get('points') or []
+                        labels = [p.get('t') for p in pts]
+                        data = [float(p.get('balance_eur', 0.0)) for p in pts]
+                        return {
+                            "labels": labels,
+                            "data": data,
+                            "count": len(pts),
+                            "demo_mode": False,
+                            "data_source": "pi_snapshot"
+                        }
+            except Exception:
+                pass
             # Look for equity file
             equity_file = self.data_dir / "equity.csv"
             if not equity_file.exists():
@@ -1868,17 +1985,24 @@ def api_sync_now():
     log_api_access('/api/sync-now', 'POST', 200)
     
     try:
-        # Sync files from Pi
-        success = sync_manager.sync_data_from_pi()
+        # First try to sync snapshots from Pi (new approach)
+        snapshot_result = sync_manager.sync_snapshots_from_pi()
         
-        if success:
-            # Import CSV data into database
+        # Also try traditional sync as fallback
+        traditional_success = sync_manager.sync_data_from_pi()
+        
+        # Determine overall success
+        success = snapshot_result['success'] or traditional_success
+        
+        if traditional_success:
+            # Import CSV data into database (traditional approach)
             imported = db_manager.import_from_csv(config.DATA_DIR)
-            
-            # Clear cache to force refresh
-            cache.clear()
-            
             logger.info(f"📊 Data imported into database: {imported}")
+        else:
+            imported = {}
+        
+        # Clear cache to force refresh
+        cache.clear()
         
         response_time = (datetime.now() - start_time).total_seconds() * 1000
         
@@ -1897,11 +2021,12 @@ def api_sync_now():
         
         return jsonify({
             "success": success,
-            "message": "Sync completed successfully" if success else "Sync failed",
+            "message": "Snapshots synced successfully" if snapshot_result['success'] else ("Sync completed successfully" if traditional_success else "Sync failed"),
             "timestamp": datetime.now().isoformat(),
             "response_time_ms": round(response_time, 2),
             "sync_status": sync_manager.get_sync_status(),
-            "imported_records": imported if success else {}
+            "snapshots_copied": snapshot_result.get('copied', 0),
+            "imported_records": imported
         })
     except Exception as e:
         response_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -2236,6 +2361,22 @@ def api_logs_download():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/pi-snapshots', methods=['POST'])
+@csrf.exempt
+@auth.login_required
+@limiter.limit("5 per minute")
+def api_pi_snapshots():
+    try:
+        res = sync_manager.sync_snapshots_from_pi()
+        return jsonify({
+            "success": res.get('success', False),
+            "copied": res.get('copied', 0),
+            "target": res.get('target'),
+            "timestamp": datetime.now().isoformat(),
+            "error": sync_manager.last_error
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     # Parse command line arguments

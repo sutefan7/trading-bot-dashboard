@@ -66,6 +66,9 @@ class Config:
     PI_PATH = os.getenv('PI_PATH', '/srv/trading-bot-pi/app/storage/reports')
     PI_APP_PATH = os.getenv('PI_APP_PATH', '/srv/trading-bot-pi/app')
     PI_DATABASE_PATH = os.getenv('PI_DATABASE_PATH', '/srv/trading-bot-pi/app/data')
+    # Local development mode: use a local copy of the Pi app instead of SSH/SCP
+    PI_LOCAL_MODE = os.getenv('PI_LOCAL_MODE', 'False').lower() == 'true'
+    LOCAL_PI_APP_PATH = Path(os.getenv('LOCAL_PI_APP_PATH', str((Path(__file__).parent / 'trading-bot-pi' / 'app').resolve())))
     SYNC_INTERVAL_MINUTES = int(os.getenv('SYNC_INTERVAL_MINUTES', '5'))
     SYNC_TIMEOUT_SECONDS = int(os.getenv('SYNC_TIMEOUT_SECONDS', '30'))
     
@@ -161,6 +164,8 @@ class Config:
             'https_enabled': cls.HTTPS_ENABLED,
             'cache_enabled': cls.CACHE_ENABLED,
             'pi_host': cls.PI_HOST,
+            'pi_local_mode': cls.PI_LOCAL_MODE,
+            'local_pi_app_path': str(cls.LOCAL_PI_APP_PATH),
             'sync_interval': cls.SYNC_INTERVAL_MINUTES,
             'database_path': str(cls.DATABASE_PATH),
         }
