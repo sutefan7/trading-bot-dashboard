@@ -263,6 +263,9 @@ class DataProcessor:
             if pi_online:
                 # Prefer Pi snapshots first
                 pi_data = pi_api_client.get_trading_performance_data()
+                if not isinstance(pi_data, dict):
+                    logger.warning("Received unexpected trading performance payload from Pi")
+                    pi_data = {"error": "invalid-payload", "data_source": "pi_snapshot"}
                 if not pi_data.get("error") and pi_data.get('data_source') == 'pi_snapshot':
                     logger.info("✅ Using Pi snapshot for trading performance")
                     return pi_data

@@ -148,6 +148,111 @@ class PiAPIClient:
         except Exception:
             return []
 
+    def _load_trading_performance_artifact(self) -> Optional[Dict[str, Any]]:
+        """Load trading performance metrics from artifacts/logs."""
+
+        def _normalise_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
+            trading_metrics = (
+                raw.get("estimated_trading_metrics")
+                or raw.get("trading_metrics")
+                or {}
+            )
+            risk_metrics = raw.get("risk_metrics", {})
+            model_metrics = raw.get("model_metrics", {})
+
+            def _safe_float(value: Any) -> float:
+                try:
+                    if value is None:
+                        return 0.0
+                    return float(value)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            def _safe_int(value: Any) -> int:
+                try:
+                    if value is None:
+                        return 0
+                    return int(value)
+                except (TypeError, ValueError):
+                    return 0
+
+            payload: Dict[str, Any] = {
+                "win_rate": _safe_float(
+                    trading_metrics.get("win_rate")
+                    or trading_metrics.get("winRate")
+                    or raw.get("win_rate")
+                ),
+                "sharpe_ratio": _safe_float(
+                    trading_metrics.get("sharpe_ratio")
+                    or trading_metrics.get("sharpe")
+                    or raw.get("sharpe")
+                ),
+                "max_drawdown": _safe_float(
+                    trading_metrics.get("max_drawdown")
+                    or risk_metrics.get("max_drawdown")
+                    or raw.get("max_drawdown")
+                ),
+                "profit_factor": _safe_float(
+                    trading_metrics.get("profit_factor")
+                    or raw.get("profit_factor")
+                ),
+                "total_trades": _safe_int(
+                    trading_metrics.get("total_trades")
+                    or raw.get("total_trades")
+                ),
+                "data_source": "pi_artifacts",
+                "timestamp": raw.get("created_at") or raw.get("timestamp"),
+            }
+
+            if model_metrics:
+                payload["model_metrics"] = model_metrics
+            if trading_metrics:
+                payload["trading_metrics"] = trading_metrics
+            if risk_metrics:
+                payload["risk_metrics"] = risk_metrics
+            if raw.get("confidence_level") is not None:
+                payload["confidence_level"] = raw.get("confidence_level")
+
+            return payload
+
+        try:
+            if self.local_mode and self.local_app_path.exists():
+                artifacts_root = self.local_app_path / "storage" / "artifacts"
+                if artifacts_root.exists():
+                    candidates = sorted(
+                        artifacts_root.rglob("trading_performance.json"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True
+                    )
+                    for candidate in candidates:
+                        try:
+                            raw = json.loads(candidate.read_text(encoding='utf-8', errors='ignore'))
+                            if isinstance(raw, dict):
+                                return _normalise_payload(raw)
+                        except Exception:
+                            continue
+            else:
+                find_cmd = (
+                    f"find {self.pi_app_path}/storage/artifacts -name 'trading_performance.json' "
+                    "-type f | head -1"
+                )
+                success, stdout, stderr = self.execute_ssh_command(find_cmd)
+                if success and stdout.strip():
+                    json_path = stdout.strip()
+                    read_cmd = f"cat {json_path}"
+                    success, stdout, stderr = self.execute_ssh_command(read_cmd)
+                    if success and stdout.strip():
+                        try:
+                            raw = json.loads(stdout)
+                            if isinstance(raw, dict):
+                                return _normalise_payload(raw)
+                        except json.JSONDecodeError:
+                            logger.warning("Invalid JSON in trading performance artifact")
+        except Exception as exc:
+            logger.warning(f"Trading performance artifact load failed: {exc}")
+
+        return None
+
     def get_trading_performance_data(self) -> Dict[str, Any]:
         """Get trading performance data from Pi logs and system"""
         try:
@@ -163,10 +268,20 @@ class PiAPIClient:
                     "data_source": "pi_snapshot",
                     "timestamp": snap.get('ts')
                 }
-                
+
+            artifact_payload = self._load_trading_performance_artifact()
+            if artifact_payload:
+                logger.info("Using artifact-based trading performance metrics")
+                return artifact_payload
+
+            return {
+                "error": "Trading performance snapshot unavailable",
+                "data_source": "pi_snapshot"
+            }
+
         except Exception as e:
             logger.error(f"💥 Trading performance error: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "data_source": "pi_snapshot"}
     
     def get_ml_model_data(self) -> Dict[str, Any]:
         """Get ML model data from Pi artifacts"""
