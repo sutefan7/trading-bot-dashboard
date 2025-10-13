@@ -55,8 +55,11 @@ const utils = {
         return this.isFinite(v) ? this.fmtCurrency.format(v) : '—'; 
     },
     
-    formatPercent(v, digits = 1) { 
-        return this.isFinite(v) ? `${v.toFixed(digits)}%` : '—'; 
+    formatPercent(v, digits = 1) {
+        const value = Number(v);
+        if (Number.isNaN(value)) return '0%';
+        const normalized = Math.abs(value) <= 1 ? value * 100 : value;
+        return `${normalized.toFixed(digits)}%`;
     },
     
     safeNumber(v, def = 0) { 
@@ -602,34 +605,42 @@ async function fetchData(endpoint) {
 // Extend ui object with renderer functions
 Object.assign(ui, {
     updateTradingPerformance(data) {
-    if (data.error) {
-        console.warn('Trading performance data error:', data.error);
-        return;
-    }
-    
+        if (data.error) {
+            console.warn('Trading performance data error:', data.error);
+            return;
+        }
+
+        const totalTrades = data.total_trades ?? 0;
+        const winningTrades = data.winning_trades ?? 0;
+        const losingTrades = data.losing_trades ?? 0;
+        const totalPnl = data.total_pnl ?? 0;
+        const avgWin = data.avg_win ?? 0;
+        const avgLoss = data.avg_loss ?? 0;
+        const profitFactor = data.profit_factor ?? 0;
+
         // Safely update elements that exist
         utils.safeUpdateElements({
-            'total-pnl': utils.formatCurrency(data.total_pnl),
+            'total-pnl': utils.formatCurrency(totalPnl),
             'win-rate': utils.formatPercent(data.win_rate),
-            'total-trades': data.total_trades,
-            'winning-trades': data.winning_trades,
-            'losing-trades': data.losing_trades,
-            'avg-win': utils.formatCurrency(data.avg_win),
-            'avg-loss': utils.formatCurrency(data.avg_loss),
-            'profit-factor': data.profit_factor
+            'total-trades': totalTrades,
+            'winning-trades': winningTrades,
+            'losing-trades': losingTrades,
+            'avg-win': utils.formatCurrency(avgWin),
+            'avg-loss': utils.formatCurrency(avgLoss),
+            'profit-factor': profitFactor.toFixed ? profitFactor.toFixed(2) : profitFactor
         });
     
     // Update win/loss chart
         if (domRefs.winLossChart) {
-            domRefs.winLossChart.data.datasets[0].data = [data.winning_trades, data.losing_trades];
+            domRefs.winLossChart.data.datasets[0].data = [winningTrades, losingTrades];
             domRefs.winLossChart.update();
         }
         
         // Update P&L color based on value (safely)
     const pnlElement = document.getElementById('total-pnl');
         if (pnlElement) {
-    pnlElement.className = data.total_pnl >= 0 ? 'text-success' : 'text-danger';
-}
+            pnlElement.className = totalPnl >= 0 ? 'text-success' : 'text-danger';
+        }
     },
     
     updatePortfolioOverview(data) {
@@ -662,8 +673,11 @@ Object.assign(ui, {
         this.updateKPIs(data);
         
         utils.safeUpdateElements({
+            'portfolio-value': utils.formatCurrency(data.total_balance),
             'total-balance': utils.formatCurrency(data.total_balance),
             'available-balance': utils.formatCurrency(data.available_balance),
+            'daily-pnl': utils.formatCurrency(data.daily_pnl ?? data.total_pnl),
+            'open-positions': data.open_positions,
             'open-positions-detail': data.open_positions,
             'portfolio-pnl': utils.formatCurrency(data.total_pnl),
             'win-rate': utils.formatPercent(data.win_rate || 0),
@@ -789,9 +803,9 @@ Object.assign(ui, {
         }
         
         // Update system status (safely)
-        const lastSyncText = data.last_sync || (data.timestamp ? new Date(data.timestamp).toLocaleString('nl-NL') : 'Live');
+        const lastSyncText = data.last_sync ? utils.formatDateTime(data.last_sync) : (data.timestamp ? utils.formatDateTime(data.timestamp) : 'Live');
         utils.safeUpdateElement('last-sync', lastSyncText);
-        utils.safeUpdateElement('data-files', data.data_files || 0);
+        utils.safeUpdateElement('data-files', data.data_files ?? 0);
         
         // Update last update time in header
         utils.safeUpdateElement('last-update-time', lastSyncText);
@@ -1218,6 +1232,163 @@ Object.assign(ui, {
             return date.toLocaleString('nl-NL', options);
         } catch (error) {
             return 'Ongeldige Datum';
+        }
+    },
+
+    updateMLModels(data) {
+        if (data?.error) {
+            console.warn('ML models error:', data.error, data.details);
+            utils.safeUpdateElement('ml-model-summary', '⚠️ Kan ML data niet laden');
+            this.updateMLModelsTable([]);
+            this.updateMLModelsStatus({});
+            this.updateSignalQuality({});
+            this.updateMarketOverview({});
+            this.updateRiskMetrics({});
+            this.updateAlerts({}, {});
+            return;
+        }
+
+        const summary = data?.summary || {};
+        const models = data?.models || [];
+        const signals = data?.signals || {};
+        const market = data?.market || {};
+        const risk = data?.risk || {};
+        const alerts = data?.alerts || {};
+        const opportunities = data?.opportunities || {};
+
+        utils.safeUpdateElements({
+            'ml-total-models': summary.total_models ?? models.length,
+            'ml-active-models': summary.active_models ?? models.length,
+            'ml-avg-accuracy': utils.formatPercent(summary.avg_accuracy ?? 0, 1),
+            'ml-avg-winrate': utils.formatPercent(summary.avg_win_rate ?? 0, 1),
+            'ml-avg-confidence': utils.formatPercent(summary.avg_confidence ?? 0, 1),
+            'ml-last-export': summary.last_export ? utils.formatDateTime(summary.last_export) : 'Onbekend',
+            'ml-model-format': summary.format ?? data?.data_source ?? 'n.v.t.'
+        });
+
+        this.updateMLModelsTable(models);
+        this.updateMLModelsStatus(data?.schema || {});
+        this.updateSignalQuality(signals);
+        this.updateMarketOverview(market);
+        this.updateRiskMetrics(risk);
+        this.updateAlerts(alerts, opportunities);
+    },
+
+    updateMLModelsTable(models) {
+        const tbody = document.getElementById('ml-models-tbody');
+        if (!tbody) return;
+
+        if (!models.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Geen ML modellen beschikbaar</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = models.map(model => {
+            const perf = model.performance || {};
+            const trading = model.trading_performance || {};
+            const statusBadge = model.status === 'active' ? 'badge bg-success' : 'badge bg-secondary';
+
+            return `
+                <tr>
+                    <td>${model.coin || model.model_name || '–'}</td>
+                    <td>${model.model_name || '–'}</td>
+                    <td>${model.framework || '–'}</td>
+                    <td>${model.version || '–'}</td>
+                    <td>${utils.formatPercent(perf.accuracy ?? trading.win_rate ?? 0, 1)}</td>
+                    <td>${utils.formatPercent(trading.win_rate ?? 0, 1)}</td>
+                    <td>${utils.formatPercent(model.confidence ?? 0, 1)}</td>
+                    <td><span class="${statusBadge}">${model.status || '–'}</span></td>
+                </tr>
+            `;
+        }).join('');
+    },
+
+    updateMLModelsStatus(schema) {
+        const statusEl = document.getElementById('ml-model-status');
+        if (!statusEl) return;
+
+        const info = schema?.ml_models || {};
+        const parts = [];
+        if (info.version) parts.push(`Schema v${info.version}`);
+        if (info.format) parts.push(`Formaat: ${info.format}`);
+        if (info.updated_at) parts.push(`Update: ${utils.formatDateTime(info.updated_at)}`);
+
+        statusEl.textContent = parts.length ? parts.join(' • ') : 'Geen schema informatie beschikbaar';
+    },
+
+    updateSignalQuality(signals) {
+        const summary = signals?.summary || {};
+        utils.safeUpdateElements({
+            'signal-total': summary.total ?? 0,
+            'signal-regime': summary.regime?.is_tradable ? 'Actief' : 'Niet tradable',
+            'signal-anchor': summary.regime?.anchor_symbol ?? '—'
+        });
+
+        const list = document.getElementById('signal-recent');
+        if (list) {
+            const recents = signals?.recent_signals || [];
+            list.innerHTML = recents.length ? recents.map(sig => `
+                <li class="list-group-item d-flex justify-content-between">
+                    <span>${sig.symbol ?? 'n/a'}</span>
+                    <span>${sig.side ?? 'n/a'}</span>
+                    <small class="text-muted">${utils.formatDateTime(sig.ts ?? sig.timestamp)}</small>
+                </li>
+            `).join('') : '<li class="list-group-item text-muted">Geen signalen</li>';
+        }
+    },
+
+    updateMarketOverview(market) {
+        utils.safeUpdateElements({
+            'market-universe': (market.universe || []).length,
+            'market-volatility': market.volatility_index ?? 'n.v.t.',
+            'market-trend': market.trend_direction ?? 'Onbekend'
+        });
+
+        const movers = document.getElementById('top-movers');
+        if (movers) {
+            const top = market.top_movers || [];
+            movers.innerHTML = top.length ? top.map(item => `
+                <div class="d-flex justify-content-between">
+                    <span>${item.symbol}</span>
+                    <span class="${item.change?.startsWith('+') ? 'text-success' : 'text-danger'}">${item.change}</span>
+                    <small class="text-muted">${item.volume ?? ''}</small>
+                </div>
+            `).join('') : '<span class="text-muted">Geen movers</span>';
+        }
+    },
+
+    updateRiskMetrics(risk) {
+        const metrics = risk?.metrics || {};
+        utils.safeUpdateElements({
+            'risk-drawdown': utils.formatPercent(metrics.current_drawdown ?? 0, 1),
+            'risk-max-drawdown': utils.formatPercent(metrics.max_drawdown_limit ?? 0, 1),
+            'risk-total-trades': metrics.total_trades ?? 0,
+            'risk-win-rate': utils.formatPercent(metrics.win_rate ?? 0, 1),
+            'risk-profit-factor': metrics.profit_factor ?? 0
+        });
+    },
+
+    updateAlerts(alerts, opportunities) {
+        const alertList = document.getElementById('critical-alerts');
+        if (alertList) {
+            const items = alerts?.alerts || [];
+            alertList.innerHTML = items.length ? items.map(alert => `
+                <div class="alert alert-info">
+                    <strong>${alert.title ?? 'Alert'}</strong>
+                    <div>${alert.message ?? ''}</div>
+                </div>
+            `).join('') : '<div class="text-muted">Geen alerts</div>';
+        }
+
+        const oppList = document.getElementById('trading-opportunities');
+        if (oppList) {
+            const items = opportunities?.opportunities || [];
+            oppList.innerHTML = items.length ? items.map(op => `
+                <div class="alert alert-warning">
+                    <strong>${op.title ?? 'Opportunity'}</strong>
+                    <div>${op.description ?? ''}</div>
+                </div>
+            `).join('') : '<div class="text-muted">Geen kansen</div>';
         }
     }
 });

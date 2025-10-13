@@ -110,52 +110,12 @@ class DataSyncManager:
                 return False
             
             # Create SCP command with improved security
-            scp_command = [
-                "scp",
-                "-o", "ConnectTimeout=10",
-                "-o", "StrictHostKeyChecking=yes",
-                "-o", "UserKnownHostsFile=~/.ssh/known_hosts",
-                "-o", "LogLevel=ERROR",
-                f"{PI_HOST}:{PI_PATH}/*.csv",
-                str(self.local_data_dir)
-            ]
-            
-            # Execute SCP command
-            result = subprocess.run(
-                scp_command,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                self.last_sync = datetime.now()
-                self.sync_status = "success"
-                self.success_count += 1
-                self.last_success = datetime.now()
-                self.last_error = None
-                logger.info("✅ Data sync successful")
-                
-                # Process and validate synced files
-                self._process_synced_files()
-                return True
-            else:
-                self.sync_status = "failed"
-                self.failure_count += 1
-                self.last_failure = datetime.now()
-                self.last_error = result.stderr.strip() or result.stdout.strip()
-                logger.error(f"❌ SCP failed: {self.last_error}")
-                # Fallback: try syncing logs and generate CSVs
-                if "No such file" in self.last_error or "readdir" in self.last_error:
-                    logger.info("🔄 Falling back to logs-based sync")
-                    ok = self._sync_logs_and_generate_csv()
-                    if ok:
-                        self.sync_status = "success"
-                        self.success_count += 1
-                        self.last_success = datetime.now()
-                        self.last_error = None
-                        return True
-                return False
+            # No direct CSVs to fetch; use snapshots JSON instead
+            logger.info("ℹ️ Pi logging v1 active – skipping CSV SCP and relying on snapshots")
+            self.last_sync = datetime.now()
+            self.sync_status = "skipped_csv"
+            self.last_error = None
+            return True
                 
         except subprocess.TimeoutExpired:
             self.sync_status = "timeout"
@@ -198,118 +158,112 @@ class DataSyncManager:
             logger.error(f"💥 Error processing files: {e}")
 
     def _sync_logs_and_generate_csv(self) -> bool:
-        """SCP logs from Pi and derive minimal CSVs for the dashboard"""
-        try:
-            logs_target = Path('logs') / 'pi'
-            logs_target.mkdir(parents=True, exist_ok=True)
-            logs_src = f"{PI_HOST}:{Config.PI_APP_PATH}/logs/*.log"
-            scp_logs = [
-                "scp",
-                "-o", "ConnectTimeout=10",
-                "-o", "StrictHostKeyChecking=yes",
-                "-o", "UserKnownHostsFile=~/.ssh/known_hosts",
-                "-o", "LogLevel=ERROR",
-                logs_src,
-                str(logs_target)
-            ]
-            res = subprocess.run(scp_logs, capture_output=True, text=True, timeout=30)
-            if res.returncode != 0:
-                self.last_error = res.stderr.strip() or res.stdout.strip()
-                logger.error(f"❌ SCP logs failed: {self.last_error}")
-                return False
-
-            perf_log = logs_target / 'performance.log'
-            if not perf_log.exists():
-                # If performance.log not present, try trading_bot.log for portfolio lines
-                perf_log = logs_target / 'trading_bot.log'
-                if not perf_log.exists():
-                    self.last_error = "No performance.log or trading_bot.log present on Pi"
-                    return False
-
-            try:
-                lines = perf_log.read_text(encoding='utf-8', errors='ignore').splitlines()
-            except Exception as e:
-                self.last_error = f"Read log error: {e}"
-                return False
-
-            # Regex: timestamp at start, then somewhere 'Portfolio: €<balance> (P&L: <pnl>)'
-            ts_re = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
-            port_re = re.compile(r"Portfolio:\s*€\s*([0-9.,]+)\s*\(P&L:\s*([-+0-9.,]+)\)")
-
-            equity_rows = []
-            last_balance = None
-            last_pnl = None
-            for ln in lines[-500:]:  # scan recent window
-                m_ts = ts_re.search(ln)
-                m_pt = port_re.search(ln)
-                if m_ts and m_pt:
-                    ts = m_ts.group(1)
-                    bal = float(m_pt.group(1).replace('.', '').replace(',', '.'))
-                    pnl = float(m_pt.group(2).replace('.', '').replace(',', '.'))
-                    equity_rows.append({
-                        'timestamp': ts,
-                        'balance': bal,
-                        'pnl': pnl
-                    })
-                    last_balance = bal
-                    last_pnl = pnl
-
-            if not equity_rows and last_balance is None:
-                self.last_error = "No portfolio lines found in logs"
-                return False
-
-            # Write equity.csv
-            equity_file = self.local_data_dir / 'equity.csv'
-            pd.DataFrame(equity_rows).to_csv(equity_file, index=False)
-
-            # Write portfolio.csv with minimal snapshot satisfying schema
-            portfolio_file = self.local_data_dir / 'portfolio.csv'
-            snap = {
-                'timestamp': equity_rows[-1]['timestamp'] if equity_rows else datetime.now().isoformat(),
-                'symbol': 'N/A', 'side': 'N/A', 'qty_req': 0, 'qty_filled': 0,
-                'status': 'N/A', 'pnl_after': last_pnl or 0.0, 'balance_after': last_balance or 0.0,
-                'model_id': '', 'model_ver': ''
-            }
-            pd.DataFrame([snap]).to_csv(portfolio_file, index=False)
-
-            # Write trades_summary.csv minimal
-            trades_file = self.local_data_dir / 'trades_summary.csv'
-            ts = equity_rows[-1]['timestamp'] if equity_rows else datetime.now().isoformat()
-            pd.DataFrame([{'timestamp': ts, 'total_trades': 0, 'unique_requests': 0, 'chain_integrity': True, 'verified_records': 0, 'total_records': 0}]).to_csv(trades_file, index=False)
-
-            logger.info("✅ Derived CSVs from logs: equity.csv, portfolio.csv, trades_summary.csv")
-            return True
-        except Exception as e:
-            self.last_error = str(e)
-            logger.error(f"💥 Logs-based sync error: {e}")
-            return False
+        logger.info("ℹ️ Log-based CSV generation disabled (Pi logging v1 snapshots in use)")
+        return False
 
     def sync_snapshots_from_pi(self) -> Dict:
-        """Copy snapshot JSONs from Pi to local data/snapshots for offline usage"""
-        result = {"success": False, "copied": 0, "target": str(self.local_data_dir / 'snapshots')}
+        """Copy snapshot JSONs/JSONL/meta from Pi to local data directory"""
+        target_root = self.local_data_dir / 'snapshots'
+        result = {
+            "success": False,
+            "copied": 0,
+            "target": str(target_root)
+        }
         try:
             if not self.check_pi_connectivity():
                 self.last_error = "Pi offline"
                 return result
-            target_dir = self.local_data_dir / 'snapshots'
-            target_dir.mkdir(parents=True, exist_ok=True)
-            src = f"{PI_HOST}:{Config.PI_APP_PATH}/storage/reports/snapshots/*.json"
-            scp_cmd = [
-                "scp",
-                "-o", "ConnectTimeout=10",
-                "-o", "StrictHostKeyChecking=yes",
-                "-o", "UserKnownHostsFile=~/.ssh/known_hosts",
-                "-o", "LogLevel=ERROR",
-                src,
-                str(target_dir)
+            target_root.mkdir(parents=True, exist_ok=True)
+
+            copy_jobs = [
+                {
+                    "description": "snapshots",
+                    "remote": f"{Config.PI_APP_PATH}/storage/reports/snapshots/*.json",
+                    "local": target_root
+                },
+                {
+                    "description": "jsonl streams",
+                    "remote": f"{Config.PI_APP_PATH}/storage/reports/jsonl/*.jsonl",
+                    "local": target_root / 'jsonl'
+                },
+                {
+                    "description": "metadata",
+                    "remote": f"{Config.PI_APP_PATH}/storage/reports/meta/*.json",
+                    "local": target_root / 'meta'
+                },
+                {
+                    "description": "ml snapshots",
+                    "remote": f"{Config.PI_APP_PATH}/storage/reports/snapshots/ml_*.json",
+                    "local": target_root
+                },
+                {
+                    "description": "signal/market snapshots",
+                    "remote": f"{Config.PI_APP_PATH}/storage/reports/snapshots/*.json",
+                    "local": target_root
+                }
             ]
-            cp = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=30)
-            if cp.returncode != 0:
-                self.last_error = cp.stderr.strip() or cp.stdout.strip()
-                return result
-            # Count copied files
-            result["copied"] = len(list(target_dir.glob('*.json')))
-            result["success"] = result["copied"] > 0
+
+            copied_total = 0
+            for job in copy_jobs:
+                local_dir = job["local"]
+                local_dir.mkdir(parents=True, exist_ok=True)
+                scp_cmd = [
+                    "scp",
+                    "-o", "ConnectTimeout=10",
+                    "-o", "StrictHostKeyChecking=yes",
+                    "-o", "UserKnownHostsFile=~/.ssh/known_hosts",
+                    "-o", "LogLevel=ERROR",
+                    f"{PI_HOST}:{job['remote']}",
+                    str(local_dir)
+                ]
+                cp = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=30)
+                if cp.returncode != 0:
+                    stderr = cp.stderr.strip() or cp.stdout.strip()
+                    if "No such file" in stderr or "not a regular file" in stderr:
+                        logger.info(f"No files for {job['description']} ({stderr})")
+                        continue
+                    self.last_error = stderr
+                    logger.error(f"Snapshot sync error for {job['description']}: {stderr}")
+                    return result
+                copied = sum(1 for _ in local_dir.iterdir())
+                copied_total += copied
+                logger.info(f"Copied {copied} files for {job['description']}")
+
+            # Ensure new single-file snapshots are copied if listed in metadata
+            meta_file = target_root / 'meta' / 'last_update.json'
+            if meta_file.exists():
+                try:
+                    data = json.loads(meta_file.read_text())
+                    files_map = data.get('files', {})
+                    extra_files = [
+                        ('snapshots/ml_models.json', target_root / 'ml_models.json'),
+                        ('snapshots/signal_overview.json', target_root / 'signal_overview.json'),
+                        ('snapshots/market_overview.json', target_root / 'market_overview.json'),
+                        ('snapshots/risk_metrics.json', target_root / 'risk_metrics.json'),
+                        ('snapshots/alerts.json', target_root / 'alerts.json'),
+                        ('snapshots/opportunities.json', target_root / 'opportunities.json'),
+                    ]
+                    for rel_path, local_path in extra_files:
+                        if rel_path in files_map or rel_path.split('/')[-1] in files_map:
+                            remote_path = f"{Config.PI_APP_PATH}/{rel_path}"
+                            scp_cmd = [
+                                "scp",
+                                "-o", "ConnectTimeout=10",
+                                "-o", "StrictHostKeyChecking=yes",
+                                "-o", "UserKnownHostsFile=~/.ssh/known_hosts",
+                                "-o", "LogLevel=ERROR",
+                                f"{PI_HOST}:{remote_path}",
+                                str(local_path)
+                            ]
+                            cp = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=30)
+                            if cp.returncode == 0:
+                                copied_total += 1
+                                logger.info(f"Copied {rel_path}")
+                except Exception as e:
+                    logger.warning(f"Could not process metadata extras: {e}")
+
+            result["copied"] = copied_total
+            result["success"] = copied_total > 0
             return result
         except Exception as e:
             self.last_error = str(e)
@@ -367,6 +321,21 @@ class DataSyncManager:
                 })
             except Exception as e:
                 logger.error(f"❌ Error reading {csv_file.name}: {e}")
+
+        snapshots_dir = self.local_data_dir / 'snapshots'
+        if snapshots_dir.exists():
+            for snap in snapshots_dir.rglob('*'):
+                if snap.is_file():
+                    try:
+                        stat = snap.stat()
+                        files.append({
+                            "name": str(snap.relative_to(self.local_data_dir)),
+                            "size": stat.st_size,
+                            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                            "exists": True
+                        })
+                    except Exception as e:
+                        logger.error(f"❌ Error reading {snap}: {e}")
                 
         return files
     

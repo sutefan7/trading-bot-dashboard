@@ -268,6 +268,10 @@ class DataProcessor:
                     pi_data = {"error": "invalid-payload", "data_source": "pi_snapshot"}
                 if not pi_data.get("error") and pi_data.get('data_source') == 'pi_snapshot':
                     logger.info("✅ Using Pi snapshot for trading performance")
+                    # Ensure snapshot payload has full metrics for UI
+                    enriched = self._enrich_performance_from_snapshot(pi_data)
+                    if enriched:
+                        return enriched
                     return pi_data
                 # Fallback to previous artifacts-based approach inside client
                 if not pi_data.get("error"):
@@ -279,74 +283,135 @@ class DataProcessor:
                 logger.info("🔄 Using fallback data - Pi unavailable or data too old")
                 return fallback_manager.get_fallback_trading_performance()
             
-            # Look for trades summary file
-            trades_file = self.data_dir / "trades_summary.csv"
-            if not trades_file.exists():
-                logger.warning("⚠️ No trades data file found, using fallback")
+            # Fallback: derive metrics from JSONL streams
+            trade_file = self.data_dir / 'snapshots' / 'jsonl' / 'trades.jsonl'
+            if not trade_file.exists():
+                logger.warning("⚠️ No trades JSONL file found, using fallback")
                 return fallback_manager.get_fallback_trading_performance()
             
-            # Validate file security
-            if not SecurityValidator.validate_csv_file(trades_file):
-                return {"error": "Invalid trades data file"}
-            
-            df = pd.read_csv(trades_file, dtype={
-                'total_trades': 'int64',
-                'unique_requests': 'int64',
-                'timestamp': 'string'
-            }, na_values=["", "N/A", "nan", None])
-            
-            # Validate data structure
-            if not SecurityValidator.validate_csv_data(df, ALLOWED_CSV_COLUMNS['trades_summary.csv']):
-                return {"error": "Invalid trades data structure"}
-            
-            # Calculate performance metrics from new CSV format
-            total_trades = df.get('total_trades', pd.Series([0])).iloc[-1] if len(df) > 0 else 0
-            winning_trades = df.get('winning_trades', pd.Series([0])).iloc[-1] if len(df) > 0 else 0
-            losing_trades = df.get('losing_trades', pd.Series([0])).iloc[-1] if len(df) > 0 else 0
-            win_rate = df.get('win_rate', pd.Series([0])).iloc[-1] if len(df) > 0 else 0
+            import json
+            wins = losses = total_trades = 0
+            pnl_total = 0.0
+            pnl_pos = 0.0
+            pnl_neg = 0.0
+            for line in trade_file.read_text(encoding='utf-8', errors='ignore').splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                total_trades += 1
+                pnl = float(rec.get('pnl_eur', rec.get('pnl', 0.0)) or 0.0)
+                pnl_total += pnl
+                if pnl > 0:
+                    wins += 1
+                    pnl_pos += pnl
+                elif pnl < 0:
+                    losses += 1
+                    pnl_neg += abs(pnl)
 
-            # Derive P&L from equity.csv when available
-            total_pnl = 0.0
-            try:
-                equity_file = self.data_dir / "equity.csv"
-                if equity_file.exists():
-                    df_equity = pd.read_csv(equity_file, dtype={
-                        'timestamp': 'string',
-                        'balance': 'float64',
-                        'pnl': 'float64'
-                    }, na_values=["", "N/A", "nan", None])
-                    if len(df_equity) > 0:
-                        if 'pnl' in df_equity.columns and not df_equity['pnl'].isna().all():
-                            total_pnl = float(df_equity['pnl'].iloc[-1] or 0.0)
-                        elif 'balance' in df_equity.columns and not df_equity['balance'].isna().all():
-                            balances = df_equity['balance'].dropna().tolist()
-                            if len(balances) >= 2:
-                                total_pnl = float(balances[-1] - balances[0])
-            except Exception:
-                total_pnl = 0.0
+            if total_trades == 0:
+                return {
+                    "total_trades": 0,
+                    "winning_trades": 0,
+                    "losing_trades": 0,
+                    "win_rate": 0.0,
+                    "total_pnl": 0.0,
+                    "avg_win": 0.0,
+                    "avg_loss": 0.0,
+                    "profit_factor": 0.0,
+                    "demo_mode": False,
+                    "data_source": "jsonl_stream"
+                }
 
-            # Placeholders for advanced metrics when not provided
-            avg_win = 0.0
-            avg_loss = 0.0
-            profit_factor = float(abs(avg_win / avg_loss)) if avg_loss != 0 else 0.0
-
+            avg_win = pnl_pos / wins if wins else 0.0
+            avg_loss = pnl_neg / losses if losses else 0.0
+            profit_factor = (pnl_pos / pnl_neg) if pnl_neg else (pnl_pos if pnl_pos else 0.0)
+            win_rate = wins / total_trades
+            
             return {
-                "total_trades": int(total_trades) if total_trades is not None else 0,
-                "winning_trades": int(winning_trades) if winning_trades is not None else 0,
-                "losing_trades": int(losing_trades) if losing_trades is not None else 0,
-                "win_rate": float(win_rate) if win_rate is not None else 0.0,
-                "total_pnl": float(total_pnl),
-                "avg_win": float(avg_win),
-                "avg_loss": float(avg_loss),
+                "total_trades": total_trades,
+                "winning_trades": wins,
+                "losing_trades": losses,
+                "win_rate": win_rate,
+                "total_pnl": pnl_total,
+                "avg_win": avg_win,
+                "avg_loss": avg_loss,
                 "profit_factor": profit_factor,
                 "demo_mode": False,
-                "data_source": "csv_local"
+                "data_source": "jsonl_stream"
             }
             
         except Exception as e:
             logger.error(f"Error processing trading performance: {e}")
             security_logger.warning(f"Trading performance processing error: {type(e).__name__}")
             return {"error": "Unable to process trading data"}
+    
+    def _enrich_performance_from_snapshot(self, snap_data: dict) -> dict:
+        """Fill missing trading metrics using snapshots/JSONL where possible"""
+        try:
+            data = dict(snap_data)
+
+            def _ensure(key: str, default, cast):
+                if key not in data or data[key] is None:
+                    try:
+                        data[key] = cast(default)
+                    except Exception:
+                        data[key] = default
+
+            # Basic numeric defaults
+            _ensure('total_pnl', 0.0, float)
+            _ensure('daily_pnl', data.get('total_pnl', 0.0), float)
+            _ensure('winning_trades', 0, int)
+            _ensure('losing_trades', 0, int)
+            _ensure('avg_win', 0.0, float)
+            _ensure('avg_loss', 0.0, float)
+
+            # Derive missing totals from JSONL if available
+            trades_jsonl = self.data_dir / 'snapshots' / 'trades.jsonl'
+            trades_stream = self.data_dir / 'snapshots' / 'jsonl' / 'trades.jsonl'
+            candidates = [trades_jsonl, trades_stream]
+
+            for path in candidates:
+                if path.exists():
+                    try:
+                        import json
+                        lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
+                        win = lose = pnl_sum = win_count = lose_count = 0
+                        for ln in lines[-200:]:
+                            try:
+                                rec = json.loads(ln)
+                            except Exception:
+                                continue
+                            pnl = rec.get('pnl', rec.get('pnl_eur'))
+                            pnl = float(pnl) if pnl is not None else 0.0
+                            pnl_sum += pnl
+                            if pnl > 0:
+                                win += 1
+                                win_count += 1
+                            elif pnl < 0:
+                                lose += 1
+                                lose_count += 1
+                        if data.get('total_trades', 0) == 0:
+                            data['total_trades'] = win + lose
+                        if not snap_data.get('winning_trades'):
+                            data['winning_trades'] = win
+                        if not snap_data.get('losing_trades'):
+                            data['losing_trades'] = lose
+                        if not snap_data.get('total_pnl'):
+                            data['total_pnl'] = pnl_sum
+                        if win_count > 0 and (not snap_data.get('avg_win')):
+                            data['avg_win'] = pnl_sum / win_count if win_count else 0.0
+                        if lose_count > 0 and (not snap_data.get('avg_loss')):
+                            data['avg_loss'] = abs(pnl_sum / lose_count) if lose_count else 0.0
+                        break
+                    except Exception:
+                        continue
+
+            return data
+        except Exception:
+            return snap_data
     
     def get_portfolio_overview(self) -> dict:
         """Get comprehensive portfolio overview with advanced metrics"""
@@ -356,15 +421,28 @@ class DataProcessor:
                 if pi_api_client.check_pi_connectivity():
                     snap = pi_api_client.get_portfolio_snapshot()
                     if not snap.get('error'):
+                        metrics = (snap.get('metrics') or {})
+                        total_trades = int(metrics.get('total_trades', snap.get('total_trades', 0)) or 0)
+                        wins = int(metrics.get('wins', snap.get('wins', 0)) or 0)
+                        losses = int(metrics.get('losses', snap.get('losses', 0)) or 0)
+                        win_rate = float(metrics.get('win_rate', wins / total_trades if total_trades else 0.0) or 0.0)
+                        daily_pnl = snap.get('daily_pnl_eur', metrics.get('daily_pnl'))
+                        if daily_pnl is None:
+                            daily_pnl = snap.get('pnl_eur', 0.0)
                         return {
                             "total_balance": float(snap.get('balance_eur', 0.0)),
-                            "available_balance": float(snap.get('balance_eur', 0.0)),
+                            "available_balance": float(snap.get('cash_eur', snap.get('balance_eur', 0.0))),
                             "total_pnl": float(snap.get('pnl_eur', 0.0)),
-                            "realized_pnl": float(snap.get('realized_pnl_eur', 0.0)) if 'realized_pnl_eur' in snap else 0.0,
-                            "unrealized_pnl": float(snap.get('unrealized_pnl_eur', 0.0)) if 'unrealized_pnl_eur' in snap else 0.0,
+                            "realized_pnl": float(snap.get('realized_pnl_eur', metrics.get('realized_pnl', 0.0)) or 0.0),
+                            "unrealized_pnl": float(snap.get('unrealized_pnl_eur', metrics.get('unrealized_pnl', 0.0)) or 0.0),
+                            "daily_pnl": float(daily_pnl or 0.0),
+                            "max_drawdown": float(metrics.get('max_drawdown', snap.get('drawdown_pct', 0.0)) or 0.0),
+                            "sharpe_ratio": float(metrics.get('sharpe', 0.0) or 0.0),
+                            "win_rate": win_rate,
                             "open_positions": int(snap.get('open_positions', 0)),
-                            "win_rate": float((snap.get('metrics', {}) or {}).get('win_rate', 0.0)),
-                            "sharpe_ratio": float((snap.get('metrics', {}) or {}).get('sharpe', 0.0)),
+                            "total_trades": total_trades,
+                            "wins": wins,
+                            "losses": losses,
                             "last_updated": snap.get('ts'),
                             "demo_mode": False,
                             "data_source": "pi_snapshot"
@@ -498,21 +576,27 @@ class DataProcessor:
                     snap = pi_api_client.get_portfolio_snapshot()
                     if not snap.get('error'):
                         holdings = []
+                        count = 0
                         for p in (snap.get('positions') or []):
-                            holdings.append({
+                            qty = p.get('qty') or p.get('quantity') or 0
+                            filled = p.get('filled_qty') or p.get('filled_quantity') or qty
+                            holding = {
                                 "symbol": p.get('symbol'),
                                 "side": p.get('side'),
-                                "quantity_requested": p.get('qty', 0),
-                                "quantity_filled": p.get('qty', 0),
+                                "quantity_requested": qty,
+                                "quantity_filled": filled,
                                 "status": p.get('status', 'open'),
-                                "pnl": p.get('pnl_eur', 0.0),
-                                "balance": p.get('balance_eur', 0.0),
-                                "percentage": p.get('weight_pct', 0.0)
-                            })
+                                "pnl": p.get('pnl_eur', p.get('pnl', 0.0) or 0.0),
+                                "balance": p.get('balance_eur', p.get('value_eur', 0.0) or 0.0),
+                                "percentage": p.get('weight_pct', p.get('weight', 0.0) or 0.0)
+                            }
+                            holdings.append(holding)
+                            if holding['balance']:
+                                count += 1
                         return {
                             "holdings": holdings,
-                            "total_balance": snap.get('balance_eur', 0.0),
-                            "total_holdings": len(holdings),
+                            "total_balance": float(snap.get('balance_eur', 0.0)),
+                            "total_holdings": count,
                             "last_updated": snap.get('ts')
                         }
             except Exception:
@@ -724,13 +808,19 @@ class DataProcessor:
             else:
                 last_sync = "Nooit gesynchroniseerd"
             
+            snapshot_count = 0
+            snapshots_dir = self.data_dir / 'snapshots'
+            if snapshots_dir.exists():
+                snapshot_count = sum(1 for _ in snapshots_dir.rglob('*') if _.is_file())
+            
             return {
                 "sync_status": "success" if pi_online else "offline",
                 "last_sync": last_sync,
                 "recent_files": len(recent_files),
-                "data_files": len(list(self.data_dir.glob("*.csv"))),
+                "data_files": len(list(self.data_dir.glob("*.csv"))) + snapshot_count,
                 "pi_online": pi_online,
-                "last_update": latest_file_time.isoformat() if latest_file_time else None
+                "last_update": latest_file_time.isoformat() if latest_file_time else None,
+                "snapshot_files": snapshot_count
             }
             
         except Exception as e:
@@ -740,90 +830,83 @@ class DataProcessor:
     
     def get_bot_activity(self) -> dict:
         """Get bot activity and decision making data"""
+        timeline = []
+        recent_decisions = []
         try:
-            # Real Pi status - inference only mode
-            current_time = datetime.now()
-            
-            activity_data = {
-                "uptime": "24/7 (Inference Service)",
-                "decision_frequency": "Continuous (Inference Only)",
-                "next_check": "N/A (No Trading Cycles)",
-                "activity_timeline": [
-                    {
-                        "timestamp": "2025-09-27T11:53:00Z",
-                        "action": "Model Export",
-                        "decision": "Export Models",
-                        "reason": "17 XGBClassifier models exported to ONNX format",
-                        "status": "completed"
-                    },
-                    {
-                        "timestamp": "2025-09-25T13:45:32Z", 
-                        "action": "Universe Selection",
-                        "decision": "Select Symbols",
-                        "reason": "Universe selection completed",
-                        "status": "completed"
-                    },
-                    {
-                        "timestamp": "2025-09-25T13:45:32Z",
-                        "action": "System Initialization", 
-                        "decision": "Initialize Bot",
-                        "reason": "Trading bot initialized in inference mode",
-                        "status": "completed"
-                    }
-                ],
-                "performance_metrics": {
-                    "total_models": 17,
-                    "active_models": 17,
-                    "inference_requests": "Continuous",
-                    "model_accuracy": "High (XGBClassifier)",
-                    "feature_count": 34
-                },
-                "market_analysis": {
-                    "status": "Active",
-                    "symbols_monitored": 12,
-                    "analysis_frequency": "Real-time",
-                    "last_analysis": current_time.strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "risk_assessment": {
-                    "level": "Low (Inference Only)",
-                    "trading_enabled": False,
-                    "risk_management": "Passive Monitoring"
-                },
-                "execution_speed": {
-                    "inference_latency": "< 100ms",
-                    "model_loading": "Optimized (ONNX)",
-                    "throughput": "High"
-                },
-                "decision_thresholds": {
-                    "confidence_threshold": 0.7,
-                    "risk_threshold": "N/A (No Trading)",
-                    "position_size": "N/A (No Trading)"
-                },
-                "recent_decisions": [
-                    {
-                        "timestamp": "2025-09-27T11:53:00Z",
-                        "action": "Model Export",
-                        "decision": "Export Models",
-                        "reason": "Export 17 models to ONNX",
-                        "status": "completed",
-                        "confidence": 1.0
-                    },
-                    {
-                        "timestamp": "2025-09-25T13:45:32Z",
-                        "action": "Universe Selection",
-                        "decision": "Select Symbols", 
-                        "reason": "Select 2 symbols from 12 available",
-                        "status": "completed",
-                        "confidence": 0.95
-                    }
-                ],
-                "service_mode": "inference_only",
-                "trading_status": "disabled",
-                "last_activity": "2025-09-27T11:53:00Z"
+            trade_file = self.data_dir / 'snapshots' / 'jsonl' / 'trades.jsonl'
+            if trade_file.exists():
+                import json
+                for ln in trade_file.read_text(encoding='utf-8', errors='ignore').splitlines()[-50:]:
+                    if not ln.strip():
+                        continue
+                    try:
+                        rec = json.loads(ln)
+                    except Exception:
+                        continue
+                    ts = rec.get('ts') or rec.get('timestamp')
+                    pnl = rec.get('pnl_eur', rec.get('pnl', 0.0))
+                    side = rec.get('side', '').upper()
+                    timeline.append({
+                        "time": ts,
+                        "action": f"Trade {rec.get('symbol')}",
+                        "decision": side or rec.get('event', 'trade'),
+                        "reason": rec.get('reason', rec.get('strategy', '')),
+                        "status": side or 'TRADE',
+                        "pnl": pnl
+                    })
+                    recent_decisions.append({
+                        "timestamp": ts,
+                        "action": rec.get('event', 'trade'),
+                        "decision": rec.get('strategy', 'n/a'),
+                        "reason": rec.get('reason', ''),
+                        "status": 'completed',
+                        "confidence": rec.get('confidence')
+                    })
+
+            portfolio_file = self.data_dir / 'snapshots' / 'jsonl' / 'portfolio_snapshots.jsonl'
+            last_portfolio = None
+            if portfolio_file.exists():
+                import json
+                lines = portfolio_file.read_text(encoding='utf-8', errors='ignore').splitlines()
+                for ln in lines[-50:]:
+                    if not ln.strip():
+                        continue
+                    try:
+                        rec = json.loads(ln)
+                    except Exception:
+                        continue
+                    last_portfolio = rec
+                    timeline.append({
+                        "time": rec.get('ts'),
+                        "action": "Portfolio Snapshot",
+                        "decision": f"Saldo €{rec.get('balance_eur')}",
+                        "reason": f"Posities: {rec.get('open_positions', 0)}",
+                        "status": 'SNAPSHOT'
+                    })
+                if last_portfolio:
+                    for p in (last_portfolio.get('positions') or [])[-10:]:
+                        recent_decisions.append({
+                            "timestamp": last_portfolio.get('ts'),
+                            "action": f"Position {p.get('symbol')}",
+                            "decision": p.get('status', 'open'),
+                            "reason": f"Qty {p.get('qty', 0)}",
+                            "status": p.get('status', 'open'),
+                            "confidence": p.get('confidence')
+                        })
+
+            timeline = sorted({t.get('time'): t for t in timeline if t.get('time')}.values(), key=lambda x: x['time'], reverse=True)[:10]
+            recent_decisions = sorted({d.get('timestamp'): d for d in recent_decisions if d.get('timestamp')}.values(), key=lambda x: x['timestamp'], reverse=True)[:10]
+
+            return {
+                "uptime": self._calculate_bot_uptime(),
+                "decision_frequency": self._calculate_decision_frequency(),
+                "next_check": self._calculate_next_check(),
+                "activity_timeline": timeline,
+                "recent_decisions": recent_decisions,
+                "service_mode": 'paper',
+                "trading_status": 'active' if timeline else 'idle',
+                "last_activity": timeline[0]['time'] if timeline else None
             }
-            
-            return activity_data
-            
         except Exception as e:
             logger.error(f"Error getting bot activity: {e}")
             security_logger.warning(f"Bot activity processing error: {type(e).__name__}")
@@ -1518,98 +1601,100 @@ class DataProcessor:
             return {"error": "Unable to process alerts"}
 
     def get_ml_models(self) -> dict:
-        """Get ML models information from Pi artifacts"""
+        """Get ML models information from Pi snapshots/meta"""
         try:
-            current_time = datetime.now()
-            
-            # Real Pi data - 17 models exported on 2025-09-27 11:53
-            # Base model template with performance metrics
-            base_model = {
-                "model_name": "XGBClassifier_v2025.09.27",
-                "model_type": "XGBClassifier",
-                "training_date": "2025-09-27",
-                "export_timestamp": "2025-09-27T11:53:00Z",
-                "features": 34,
-                "format": "ONNX",
-                "status": "active",
-                "last_prediction": current_time.strftime("%H:%M")
+            pi_data = pi_api_client.get_ml_model_data()
+            if not pi_data or pi_data.get('error'):
+                error_msg = pi_data.get('error') if isinstance(pi_data, dict) else 'Unknown ML data error'
+                logger.warning(f"ML model data error from Pi: {error_msg}")
+                raise ValueError(error_msg)
+
+            summary = {
+                "total_models": 0,
+                "active_models": 0,
+                "avg_accuracy": 0.0,
+                "avg_win_rate": 0.0,
+                "avg_confidence": 0.0,
+                "last_export": None,
+                "format": None,
+                "data_source": pi_data.get('data_source', 'unknown')
             }
-            
-            # Model configurations with different performance metrics
-            model_configs = [
-                {"coin": "ADA-USD", "confidence": 0.75, "accuracy": 0.75, "auc": 0.82, "win_rate": 0.68, "return": 0.12},
-                {"coin": "AVAX-USD", "confidence": 0.72, "accuracy": 0.72, "auc": 0.79, "win_rate": 0.65, "return": 0.08},
-                {"coin": "BNB-USD", "confidence": 0.78, "accuracy": 0.78, "auc": 0.84, "win_rate": 0.71, "return": 0.15},
-                {"coin": "BTC-USD", "confidence": 0.82, "accuracy": 0.82, "auc": 0.87, "win_rate": 0.74, "return": 0.18},
-                {"coin": "DOGE-USD", "confidence": 0.69, "accuracy": 0.69, "auc": 0.76, "win_rate": 0.62, "return": 0.05},
-                {"coin": "ETH-USD", "confidence": 0.81, "accuracy": 0.81, "auc": 0.86, "win_rate": 0.73, "return": 0.16},
-                {"coin": "HYPE-USD", "confidence": 0.73, "accuracy": 0.73, "auc": 0.80, "win_rate": 0.66, "return": 0.09},
-                {"coin": "SOL-USD", "confidence": 0.76, "accuracy": 0.76, "auc": 0.83, "win_rate": 0.69, "return": 0.13},
-                {"coin": "STETH-USD", "confidence": 0.74, "accuracy": 0.74, "auc": 0.81, "win_rate": 0.67, "return": 0.10},
-                {"coin": "TRX-USD", "confidence": 0.71, "accuracy": 0.71, "auc": 0.78, "win_rate": 0.64, "return": 0.07},
-                {"coin": "WBETH-USD", "confidence": 0.77, "accuracy": 0.77, "auc": 0.84, "win_rate": 0.70, "return": 0.14},
-                {"coin": "XRP-USD", "confidence": 0.70, "accuracy": 0.70, "auc": 0.77, "win_rate": 0.63, "return": 0.06}
-            ]
-            
-            # Build models with complete data structure
+
             models = []
-            for config in model_configs:
-                model = base_model.copy()
-                model.update({
-                    "coin": config["coin"],
-                    "confidence": config["confidence"],
-                    "performance": {
-                        "accuracy": config["accuracy"],
-                        "auc": config["auc"],
-                        "precision": config["accuracy"] - 0.02,  # Slightly lower precision
-                        "recall": config["accuracy"] + 0.01       # Slightly higher recall
-                    },
-                    "trading_performance": {
-                        "win_rate": config["win_rate"],
-                        "total_return": config["return"],
-                        "sharpe_ratio": round(config["return"] * 8, 2),  # Approximate Sharpe
-                        "max_drawdown": round(-config["return"] * 0.6, 2)  # Approximate drawdown
-                    }
-                })
-                models.append(model)
-            
-            # Calculate summary statistics
-            total_models = 17  # From export_summary.json
-            active_models = len(models)
-            avg_confidence = sum(m["confidence"] for m in models) / len(models)
-            avg_accuracy = sum(m["performance"]["accuracy"] for m in models) / len(models)
-            avg_win_rate = sum(m["trading_performance"]["win_rate"] for m in models) / len(models)
-            
-            return {
-                "models": models,
-                "summary": {
-                    "total_models": total_models,
-                    "active_models": active_models,
-                    "avg_confidence": round(avg_confidence, 3),
-                    "avg_accuracy": round(avg_accuracy, 3),
-                    "avg_win_rate": round(avg_win_rate, 3),
-                    "feature_count": 34,
-                    "format": "ONNX",
-                    "last_export": "2025-09-27T11:53:00Z",
-                    "last_updated": current_time.strftime("%Y-%m-%d %H:%M:%S")
+
+            schema = pi_data.get('schema') or {}
+            last_update = pi_data.get('last_update') or {}
+            entries = pi_data.get('models') or []
+
+            if isinstance(entries, dict):
+                entries = entries.get('models') or entries.get('entries') or []
+
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+
+                model = {
+                    "model_name": entry.get('model_name') or entry.get('id') or entry.get('name'),
+                    "version": entry.get('model_version') or entry.get('version'),
+                    "coin": entry.get('symbol') or entry.get('coin'),
+                    "framework": entry.get('framework') or entry.get('format'),
+                    "status": entry.get('status', 'active'),
+                    "last_prediction": entry.get('last_prediction_at') or entry.get('updated_at'),
+                    "confidence": entry.get('confidence'),
+                    "performance": entry.get('performance') or {},
+                    "trading_performance": entry.get('trading_performance') or {},
+                    "features": entry.get('features') or entry.get('feature_count'),
+                    "metadata": entry
                 }
+                models.append(model)
+
+            if models:
+                summary["total_models"] = len(models)
+                active = [m for m in models if (m.get('status') or 'active') == 'active']
+                summary["active_models"] = len(active)
+
+                def _collect(key: str, subkey: str | None = None):
+                    values = []
+                    for mdl in models:
+                        source = mdl.get(key) or {}
+                        value = source.get(subkey) if subkey else mdl.get(key)
+                        if isinstance(value, (int, float)):
+                            values.append(value)
+                    return values
+
+                acc_vals = _collect('performance', 'accuracy')
+                win_vals = _collect('trading_performance', 'win_rate')
+                conf_vals = [m.get('confidence') for m in models if isinstance(m.get('confidence'), (int, float))]
+
+                if acc_vals:
+                    summary['avg_accuracy'] = round(sum(acc_vals) / len(acc_vals), 4)
+                if win_vals:
+                    summary['avg_win_rate'] = round(sum(win_vals) / len(win_vals), 4)
+                if conf_vals:
+                    summary['avg_confidence'] = round(sum(conf_vals) / len(conf_vals), 4)
+
+            if last_update:
+                summary['last_export'] = last_update.get('ml_models') or last_update.get('models')
+
+            if schema:
+                summary['format'] = schema.get('ml_models', {}).get('format')
+
+            return {
+                "summary": summary,
+                "models": models,
+                "schema": schema,
+                "signals": pi_data.get('signals'),
+                "market": pi_data.get('market'),
+                "risk": pi_data.get('risk'),
+                "alerts": pi_data.get('alerts'),
+                "opportunities": pi_data.get('opportunities'),
+                "last_update": last_update,
+                "data_source": summary['data_source']
             }
             
         except Exception as e:
             logger.error(f"Error getting ML models: {e}")
-            return {
-                "models": [],
-                "summary": {
-                    "total_models": 0,
-                    "active_models": 0,
-                    "avg_confidence": 0.0,
-                    "feature_count": 0,
-                    "format": "Unknown",
-                    "last_export": "Unknown",
-                    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "error": str(e)
-            }
+            return {"error": "Unable to fetch ML models", "details": str(e)}
 
 
 # Initialize data processor
@@ -1948,17 +2033,13 @@ def api_bot_status():
     """API endpoint for bot status"""
     client_ip = get_remote_address()
     security_logger.info(f"API access: bot-status from {client_ip}")
-    
+
     try:
-        # Try to get data from Pi logs first
         if pi_api_client.check_pi_connectivity():
             pi_data = pi_api_client.get_bot_status_data()
             if not pi_data.get("error"):
                 return jsonify(pi_data)
-        
-        # Fallback to data processor
         return jsonify(data_processor.get_bot_status())
-        
     except Exception as e:
         logger.error(f"💥 Bot status error: {e}")
         return jsonify({"error": str(e)})
@@ -2003,9 +2084,9 @@ def api_sync_now():
             logger.info(f"📊 Data imported into database: {imported}")
         else:
             imported = {}
-        
-        # Clear cache to force refresh
-        cache.clear()
+            
+            # Clear cache to force refresh
+            cache.clear()
         
         response_time = (datetime.now() - start_time).total_seconds() * 1000
         

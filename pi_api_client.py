@@ -279,7 +279,7 @@ class PiAPIClient:
             # Prefer snapshot first
             ok, snap = self._read_snapshot('storage/reports/snapshots/performance_summary.json')
             if ok and snap:
-                return {
+                payload = {
                     "win_rate": float(snap.get('win_rate', 0.0)),
                     "sharpe_ratio": float(snap.get('sharpe', snap.get('sharpe_ratio', 0.0))),
                     "max_drawdown": float(snap.get('max_drawdown', 0.0)),
@@ -288,6 +288,45 @@ class PiAPIClient:
                     "data_source": "pi_snapshot",
                     "timestamp": snap.get('ts')
                 }
+
+                # Optional metrics from snapshot
+                if snap.get('total_pnl') is not None:
+                    try:
+                        payload['total_pnl'] = float(snap.get('total_pnl'))
+                    except (TypeError, ValueError):
+                        payload['total_pnl'] = 0.0
+
+                if snap.get('winning_trades') is not None:
+                    try:
+                        payload['winning_trades'] = int(snap.get('winning_trades'))
+                    except (TypeError, ValueError):
+                        payload['winning_trades'] = 0
+
+                if snap.get('losing_trades') is not None:
+                    try:
+                        payload['losing_trades'] = int(snap.get('losing_trades'))
+                    except (TypeError, ValueError):
+                        payload['losing_trades'] = 0
+
+                if snap.get('avg_win') is not None:
+                    try:
+                        payload['avg_win'] = float(snap.get('avg_win'))
+                    except (TypeError, ValueError):
+                        payload['avg_win'] = 0.0
+
+                if snap.get('avg_loss') is not None:
+                    try:
+                        payload['avg_loss'] = float(snap.get('avg_loss'))
+                    except (TypeError, ValueError):
+                        payload['avg_loss'] = 0.0
+
+                if snap.get('daily_pnl') is not None:
+                    try:
+                        payload['daily_pnl'] = float(snap.get('daily_pnl'))
+                    except (TypeError, ValueError):
+                        payload['daily_pnl'] = payload.get('total_pnl', 0.0)
+
+                return payload
 
             artifact_payload = self._load_trading_performance_artifact()
             if artifact_payload:
@@ -298,71 +337,73 @@ class PiAPIClient:
                 "error": "Trading performance snapshot unavailable",
                 "data_source": "pi_snapshot"
             }
-
+            
         except Exception as e:
             logger.error(f"💥 Trading performance error: {e}")
             return {"error": str(e), "data_source": "pi_snapshot"}
     
     def get_ml_model_data(self) -> Dict[str, Any]:
-        """Get ML model data from Pi artifacts"""
+        """Get ML model and analytics data from Pi snapshots/meta"""
         try:
-            # Get export summary
+            def _read_pi_json(path: str) -> Optional[Dict[str, Any]]:
+                try:
+                    if self.local_mode and self.local_app_path.exists():
+                        full = self.local_app_path / path
+                        if full.exists():
+                            return json.loads(full.read_text(encoding='utf-8', errors='ignore'))
+                        return None
+                    success, stdout, _ = self.execute_ssh_command(f"cat {self.pi_app_path}/{path}")
+                    if success and stdout.strip():
+                        return json.loads(stdout)
+                except Exception:
+                    return None
+                return None
+
+            payload: Dict[str, Any] = {"data_source": "pi_snapshots"}
+            schema = _read_pi_json('storage/reports/meta/schema.json')
+            last_update = _read_pi_json('storage/reports/meta/last_update.json')
+            ml_models = _read_pi_json('storage/reports/snapshots/ml_models.json')
+            signal_overview = _read_pi_json('storage/reports/snapshots/signal_overview.json')
+            market_overview = _read_pi_json('storage/reports/snapshots/market_overview.json')
+            risk_metrics = _read_pi_json('storage/reports/snapshots/risk_metrics.json')
+            alerts = _read_pi_json('storage/reports/snapshots/alerts.json')
+            opportunities = _read_pi_json('storage/reports/snapshots/opportunities.json')
+
+            if schema:
+                payload['schema'] = schema
+            if last_update:
+                payload['last_update'] = last_update
+            if ml_models:
+                payload['models'] = ml_models.get('models') or ml_models
+            if signal_overview:
+                payload['signals'] = signal_overview
+            if market_overview:
+                payload['market'] = market_overview
+            if risk_metrics:
+                payload['risk'] = risk_metrics
+            if alerts:
+                payload['alerts'] = alerts
+            if opportunities:
+                payload['opportunities'] = opportunities
+
+            if len(payload) > 1:
+                return payload
+
+            # Fallback to legacy artifacts summary
             export_cmd = f"cat {self.pi_app_path}/storage/artifacts/export_summary.json" if not self.local_mode else f"cat storage/artifacts/export_summary.json"
-            success, stdout, stderr = self.execute_ssh_command(export_cmd)
-            
+            success, stdout, _ = self.execute_ssh_command(export_cmd)
             export_data = {}
             if success:
                 try:
                     export_data = json.loads(stdout)
                 except json.JSONDecodeError:
                     pass
-            
-            # Get latest model
-            latest_cmd = f"cat {self.pi_app_path}/storage/artifacts/latest.txt" if not self.local_mode else f"cat storage/artifacts/latest.txt"
-            success, stdout, stderr = self.execute_ssh_command(latest_cmd)
-            latest_model = stdout.strip() if success else "unknown"
-            
-            # Get index.yaml for all symbols
-            index_cmd = f"cat {self.pi_app_path}/storage/artifacts/index.yaml" if not self.local_mode else f"cat storage/artifacts/index.yaml"
-            success, stdout, stderr = self.execute_ssh_command(index_cmd)
-            symbols = []
-            if success:
-                # Parse YAML-like content to extract symbols
-                for line in stdout.strip().split('\n'):
-                    if ':' in line and not line.strip().startswith('models:'):
-                        symbol = line.split(':')[0].strip()
-                        if symbol:
-                            symbols.append(symbol)
-            
-            # Get latest model metadata
-            latest_metadata = {}
-            if latest_model != "unknown":
-                metadata_cmd = f"cat {self.pi_app_path}/storage/artifacts/{latest_model}/metadata.json" if not self.local_mode else f"cat storage/artifacts/{latest_model}/metadata.json"
-                success, stdout, stderr = self.execute_ssh_command(metadata_cmd)
-                if success:
-                    try:
-                        latest_metadata = json.loads(stdout)
-                    except json.JSONDecodeError:
-                        pass
-            
+
             return {
-                "model_version": latest_model,
-                "symbols": symbols,
-                "train_window": "unknown",  # Not available in current artifacts
-                "metrics": {
-                    "total_models": export_data.get("total_models", 0),
-                    "feature_count": export_data.get("feature_count", 0)
-                },
-                "verified": True,  # Models are exported, so considered verified
-                "created_at": export_data.get("export_timestamp", ""),
-                "feature_count": export_data.get("feature_count", 0),
-                "schema_version": "1.0",
-                "model_type": latest_metadata.get("model_type", "unknown"),
-                "coin": latest_metadata.get("coin", "unknown"),
-                "format": export_data.get("format", "unknown"),
+                "summary": export_data,
                 "data_source": "pi_artifacts"
             }
-                
+            
         except Exception as e:
             logger.error(f"💥 ML model data error: {e}")
             return {"error": str(e)}
@@ -371,7 +412,14 @@ class PiAPIClient:
         """Get bot status from Pi logs and processes"""
         try:
             ok, snap = self._read_snapshot('storage/reports/snapshots/bot_status.json')
+            ok_meta, meta = self._read_snapshot('storage/reports/meta/last_update.json')
+
             if ok and snap:
+                data_files = 0
+                if ok_meta and isinstance(meta, dict):
+                    files_map = meta.get('files') or {}
+                    data_files = len(files_map)
+
                 return {
                     "pi_online": bool(snap.get('pi_online', True)),
                     "bot_running": bool(snap.get('bot_running', False)),
@@ -380,6 +428,7 @@ class PiAPIClient:
                     "last_decision_at": snap.get('last_decision_at'),
                     "recent_logs": snap.get('recent_logs', []),
                     "last_sync": snap.get('ts'),
+                    "data_files": data_files,
                     "data_source": "pi_snapshot",
                     "timestamp": snap.get('ts')
                 }
@@ -529,6 +578,10 @@ class PiAPIClient:
         ok, snap = self._read_snapshot('storage/reports/snapshots/portfolio.json')
         if ok and snap:
             return snap
+        # Fallback: use latest entry from JSONL stream
+        stream = self._read_jsonl_tail('storage/reports/jsonl/portfolio_snapshots.jsonl', n=1)
+        if stream:
+            return stream[-1]
         return {"error": "no_portfolio_snapshot"}
 
     def get_equity_24h_snapshot(self) -> Dict[str, Any]:
@@ -548,4 +601,4 @@ class PiAPIClient:
             "success_rate": self.success_count / (self.success_count + self.failure_count) if (self.success_count + self.failure_count) > 0 else 0,
             "last_success": self.last_success.isoformat() if self.last_success else None,
             "last_failure": self.last_failure.isoformat() if self.last_failure else None
-        }
+            }

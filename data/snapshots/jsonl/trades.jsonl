@@ -1,0 +1,1 @@
+{"event":"dummy","ts":"2025-10-13T17:19:00Z","trade_id":"dummy-0001","symbol":"TEST-USD","side":"buy","qty":0.5,"entry_price_eur":123.45,"exit_price_eur":123.45,"pnl_eur":0.0,"pnl_pct":0.0,"reason":"dummy_backfill","strategy":"dummy_strategy","ml":false}
