@@ -1288,18 +1288,18 @@ Object.assign(ui, {
             const trading = model.trading_performance || {};
             const statusBadge = model.status === 'active' ? 'badge bg-success' : 'badge bg-secondary';
 
-            return `
-                <tr>
-                    <td>${model.coin || model.model_name || '–'}</td>
-                    <td>${model.model_name || '–'}</td>
-                    <td>${model.framework || '–'}</td>
-                    <td>${model.version || '–'}</td>
-                    <td>${utils.formatPercent(perf.accuracy ?? trading.win_rate ?? 0, 1)}</td>
-                    <td>${utils.formatPercent(trading.win_rate ?? 0, 1)}</td>
-                    <td>${utils.formatPercent(model.confidence ?? 0, 1)}</td>
-                    <td><span class="${statusBadge}">${model.status || '–'}</span></td>
-                </tr>
-            `;
+        return `
+            <tr>
+                <td>${model.coin || model.model_name || '–'}</td>
+                <td>${model.model_name || '–'}</td>
+                <td>${model.framework || '–'}</td>
+                <td>${model.version || '–'}</td>
+                <td>${utils.formatPercent(perf.accuracy ?? 0, 1)}</td>
+                <td>${utils.formatPercent(trading.win_rate ?? perf.win_rate ?? 0, 1)}</td>
+                <td>${utils.formatPercent(model.confidence ?? trading.confidence ?? 0, 1)}</td>
+                <td><span class="${statusBadge}">${model.status || '–'}</span></td>
+            </tr>
+        `;
         }).join('');
     },
 
