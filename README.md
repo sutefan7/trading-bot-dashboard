@@ -196,6 +196,12 @@ Pi (192.168.1.104)          Mac (localhost)
 - **Error Monitoring**: Recent errors en system warnings
 - **Auto Refresh**: Status van automatische updates
 
+## ✅ Policy Safelist (Examples Only)
+
+- `examples/` onder `static/` of `templates/` mag UI-demo’s bevatten voor documentatie.
+- Zet duidelijk **NO DEPLOY** banners in iedere voorbeeldpagina.
+- Houd productiecode vrij van `simple_*`, `*_lite.py`, `*_demo.py` of `*_v2_test.py` bestanden; upgrade bestaande modules in plaats van fallback-varianten.
+
 ## 🚀 **Nieuwe Features (v2.0)**
 
 ### **🔗 Pi Database Integration**
