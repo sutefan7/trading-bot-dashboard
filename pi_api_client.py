@@ -360,9 +360,10 @@ class PiAPIClient:
                 return None
 
             payload: Dict[str, Any] = {"data_source": "pi_snapshots"}
+
             schema = _read_pi_json('storage/reports/meta/schema.json')
             last_update = _read_pi_json('storage/reports/meta/last_update.json')
-            ml_models = _read_pi_json('storage/reports/snapshots/ml_models.json')
+            ml_snapshot = _read_pi_json('storage/reports/snapshots/ml_models.json')
             signal_overview = _read_pi_json('storage/reports/snapshots/signal_overview.json')
             market_overview = _read_pi_json('storage/reports/snapshots/market_overview.json')
             risk_metrics = _read_pi_json('storage/reports/snapshots/risk_metrics.json')
@@ -373,8 +374,10 @@ class PiAPIClient:
                 payload['schema'] = schema
             if last_update:
                 payload['last_update'] = last_update
-            if ml_models:
-                payload['models'] = ml_models.get('models') or ml_models
+            if ml_snapshot:
+                payload['models'] = ml_snapshot.get('models') or []
+                if ml_snapshot.get('artifacts'):
+                    payload['artifacts'] = ml_snapshot['artifacts']
             if signal_overview:
                 payload['signals'] = signal_overview
             if market_overview:
