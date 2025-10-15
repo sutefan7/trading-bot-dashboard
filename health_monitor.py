@@ -640,10 +640,34 @@ class HealthMonitor:
             "unknown": sum(1 for check in checks if check.status == HealthStatus.UNKNOWN)
         }
         
+        total_checks = len(checks)
+        healthy_percentage = (status_counts["healthy"] / total_checks) * 100 if total_checks else 0
+
+        headline = "Geen health checks uitgevoerd"
+        summary_details: Dict[str, Any] = {}
+
+        if total_checks:
+            warning_percent = (status_counts["warning"] / total_checks) * 100
+            critical_percent = (status_counts["critical"] / total_checks) * 100
+            summary_details = {
+                "healthy_percent": healthy_percentage,
+                "warning_percent": warning_percent,
+                "critical_percent": critical_percent,
+            }
+
+            if status_counts["critical"]:
+                headline = f"{status_counts['critical']} kritieke checks gedetecteerd"
+            elif status_counts["warning"]:
+                headline = f"{status_counts['warning']} waarschuwingen gedetecteerd"
+            else:
+                headline = "Alle health checks zijn groen"
+
         return {
-            "total_checks": len(checks),
+            "total_checks": total_checks,
             "status_counts": status_counts,
-            "health_percentage": (status_counts["healthy"] / len(checks)) * 100 if checks else 0
+            "health_percentage": healthy_percentage,
+            "headline": headline,
+            "details": summary_details,
         }
     
     def _generate_recommendations(self, checks: List[HealthCheck]) -> List[str]:
