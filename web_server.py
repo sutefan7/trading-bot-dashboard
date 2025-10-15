@@ -5,17 +5,10 @@ Provides REST API for dashboard data with enhanced security and performance
 """
 import os
 import json
-import logging
-import re
-import ssl
-import argparse
-import time
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Optional, Dict, Any
-
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta
+from pathlib import Path
 from flask import Flask, render_template, jsonify, request, redirect, url_for, send_file
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -23,6 +16,11 @@ from flask_limiter.util import get_remote_address
 from flask_httpauth import HTTPBasicAuth
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import check_password_hash, generate_password_hash
+import logging
+import re
+import ssl
+import argparse
+import time
 
 # Import our modules
 from config import Config, get_config
@@ -284,12 +282,6 @@ class DataProcessor:
             if fallback_manager.is_fallback_needed(pi_online):
                 logger.info("🔄 Using fallback data - Pi unavailable or data too old")
                 return fallback_manager.get_fallback_trading_performance()
-
-            # Pi online but snapshot unavailable: attempt local CSV artifacts first
-            local_csv_metrics = self._load_local_trading_performance()
-            if local_csv_metrics:
-                logger.info("📊 Using local CSV trading performance artifacts")
-                return local_csv_metrics
             
             # Fallback: derive metrics from JSONL streams
             trade_file = self.data_dir / 'snapshots' / 'jsonl' / 'trades.jsonl'
@@ -356,51 +348,6 @@ class DataProcessor:
             security_logger.warning(f"Trading performance processing error: {type(e).__name__}")
             return {"error": "Unable to process trading data"}
     
-    def _load_local_trading_performance(self) -> Optional[Dict[str, Any]]:
-        """Load trading performance metrics from local CSV artifacts when Pi snapshot missing"""
-        try:
-            trades_csv = self.data_dir / "trades_summary.csv"
-            if not trades_csv.exists():
-                return None
-
-            df = pd.read_csv(trades_csv)
-            if df.empty:
-                return None
-
-            latest = df.iloc[-1]
-
-            total_trades = int(latest.get("total_trades", 0) or 0)
-            winning_trades = int(latest.get("winning_trades", latest.get("wins")) or 0)
-            losing_trades = int(latest.get("losing_trades", latest.get("losses")) or 0)
-
-            win_rate_series = ["win_rate", "winrate", "win_ratio"]
-            win_rate = None
-            for col in win_rate_series:
-                if col in latest and pd.notna(latest[col]):
-                    win_rate = float(latest[col])
-                    break
-
-            if win_rate is None:
-                win_rate = float(total_trades and winning_trades / max(total_trades, 1))
-
-            return {
-                "total_trades": total_trades,
-                "winning_trades": winning_trades,
-                "losing_trades": losing_trades,
-                "win_rate": win_rate,
-                "total_pnl": float(latest.get("total_pnl", latest.get("pnl", 0.0)) or 0.0),
-                "avg_win": float(latest.get("avg_win", 0.0) or 0.0),
-                "avg_loss": float(latest.get("avg_loss", 0.0) or 0.0),
-                "profit_factor": float(latest.get("profit_factor", 0.0) or 0.0),
-                "demo_mode": False,
-                "data_source": "csv_local",
-                "last_updated": datetime.fromtimestamp(trades_csv.stat().st_mtime).isoformat(),
-            }
-
-        except Exception as exc:
-            logger.error(f"Error loading local trading performance CSV: {exc}")
-            return None
-
     def _enrich_performance_from_snapshot(self, snap_data: dict) -> dict:
         """Fill missing trading metrics using snapshots/JSONL where possible"""
         try:
