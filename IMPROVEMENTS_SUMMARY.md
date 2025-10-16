@@ -122,6 +122,16 @@ $ curl -u admin:pass http://localhost:5001/api/stats | jq '.cache'
 
 ---
 
+### 5. 🔄 **Najaar 2025 - Dashboard Hardening**
+
+- 🛡️ CSV-validatie gefixt: `SecurityValidator` gebruikt nu centrale configuratie (`MAX_FILE_SIZE`, kolomregels) en heeft regressietests.
+- 🚚 Lokale Pi-modus robuuster: `config.LOCAL_PI_APP_PATH` autodetecteert sibling-repo's en `DataSyncManager` slaat `ping` netjes over.
+- 📈 Health-monitor stabiliteit: CPU-core detectie valt terug op veilige defaults waardoor checks niet meer crashen.
+- 🧪 Test suite uitgebreid: `test_dashboard.py` dekt nu security-validatie en lokale sync-paths zodat regressies direct zichtbaar zijn.
+- 📜 Logging consistentie: `data_sync` schrijft naar `logs/sync.log` binnen het project en initialiseert directories via `Config.init_app()`.
+
+---
+
 ### 5. 🛠️ **Developer Experience**
 
 #### Verbeterde Dev Watcher:
@@ -382,4 +392,3 @@ python3 web_server.py
 ---
 
 **🎯 Het dashboard is nu Production-Ready voor real trading!**
-

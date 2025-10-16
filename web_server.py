@@ -36,6 +36,9 @@ from audit_logger import audit_logger, log_api_access, log_sync_activity
 # Initialize configuration
 config = get_config()
 
+MAX_FILE_SIZE = config.MAX_FILE_SIZE
+ALLOWED_CSV_COLUMNS = config.ALLOWED_CSV_COLUMNS
+
 # Setup logging with rotation
 from logging.handlers import RotatingFileHandler
 

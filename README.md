@@ -33,6 +33,7 @@ Een professioneel, beveiligd dashboard om je Trading Bot op de Raspberry Pi te m
 - **PID File Management**: Clean process handling zonder pkill hacks
 - **Test Framework**: Unit tests voor core functionality
 - **Multiple Environments**: Development, Production, Testing modes
+- **Pi Local Mode**: Zet `PI_LOCAL_MODE=true` voor offline testen; path naar `../trading-bot-pi/app` wordt automatisch gevonden
 
 ## 🚀 Quick Start
 

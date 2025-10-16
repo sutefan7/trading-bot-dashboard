@@ -4,6 +4,7 @@ Basic Tests for Trading Bot Dashboard
 Run with: python3 test_dashboard.py
 """
 import unittest
+import unittest.mock as mock
 import tempfile
 import shutil
 from pathlib import Path
@@ -14,6 +15,8 @@ from config import Config, TestConfig
 from database import DatabaseManager
 from cache import AdvancedCache as SimpleCache, cached
 from pi_api_client import PiAPIClient
+from data_sync import DataSyncManager
+import web_server
 
 
 class TestConfigManagement(unittest.TestCase):
@@ -195,18 +198,53 @@ class TestPiAPILocalMode(unittest.TestCase):
 
 
 class TestSecurityValidator(unittest.TestCase):
-    """Test security validation"""
+    """Test security validator functionaliteit"""
     
     def setUp(self):
-        """Import SecurityValidator"""
-        # This would need to be imported from web_server
-        # Skipping for now as it requires Flask context
-        pass
+        """Bereid tijdelijke map voor"""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_path = Path(self.temp_dir.name)
+    
+    def tearDown(self):
+        """Ruim tijdelijk pad op"""
+        self.temp_dir.cleanup()
     
     def test_filename_sanitization(self):
-        """Test filename sanitization"""
-        # Test would go here
-        pass
+        """Pad-traversal moet verwijderd worden"""
+        sanitized = web_server.SecurityValidator.sanitize_filename("../etc/passwd;rm -rf")
+        self.assertEqual(sanitized, "passwdrm-rf")
+    
+    def test_validate_csv_file_rejects_large_files(self):
+        """Bestanden boven limiet mogen niet door"""
+        csv_path = self.temp_path / "portfolio.csv"
+        csv_path.write_text("symbol,qty\nBTC,1\n", encoding='utf-8')
+        with mock.patch.object(web_server, "MAX_FILE_SIZE", 10):
+            self.assertFalse(web_server.SecurityValidator.validate_csv_file(csv_path))
+    
+    def test_validate_csv_data_missing_columns(self):
+        """Kolommen-check moet ontbreken detecteren"""
+        df = pd.DataFrame({"timestamp": [datetime.now()]})
+        required = ["timestamp", "symbol"]
+        self.assertFalse(web_server.SecurityValidator.validate_csv_data(df, required))
+
+
+class TestDataSyncManager(unittest.TestCase):
+    """Test DataSync manager gedrag"""
+    
+    def test_local_mode_short_circuits_ping(self):
+        """Lokale modus moet ping overslaan maar True retourneren"""
+        original_mode = Config.PI_LOCAL_MODE
+        original_path = Config.LOCAL_PI_APP_PATH
+        temp_dir = tempfile.TemporaryDirectory()
+        try:
+            Config.PI_LOCAL_MODE = True
+            Config.LOCAL_PI_APP_PATH = Path(temp_dir.name)
+            manager = DataSyncManager()
+            self.assertTrue(manager.check_pi_connectivity())
+        finally:
+            Config.PI_LOCAL_MODE = original_mode
+            Config.LOCAL_PI_APP_PATH = original_path
+            temp_dir.cleanup()
 
 
 def run_tests():
@@ -224,6 +262,8 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestDatabase))
     suite.addTests(loader.loadTestsFromTestCase(TestCache))
     suite.addTests(loader.loadTestsFromTestCase(TestPiAPILocalMode))
+    suite.addTests(loader.loadTestsFromTestCase(TestSecurityValidator))
+    suite.addTests(loader.loadTestsFromTestCase(TestDataSyncManager))
     
     # Run tests
     runner = unittest.TextTestRunner(verbosity=2)
@@ -247,4 +287,3 @@ if __name__ == '__main__':
     import sys
     success = run_tests()
     sys.exit(0 if success else 1)
-

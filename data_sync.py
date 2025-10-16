@@ -22,16 +22,18 @@ PI_PATH = Config.PI_PATH  # e.g. /srv/trading-bot-pi/app/storage/reports
 LOCAL_DATA_DIR = Config.DATA_DIR
 SYNC_INTERVAL_MINUTES = Config.SYNC_INTERVAL_MINUTES
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/sync.log'),
-        logging.StreamHandler()
-    ]
-)
+Config.init_app()
+
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler = logging.FileHandler(Config.LOGS_DIR / 'sync.log')
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+logger.setLevel(logging.INFO)
 
 
 class DataSyncManager:
@@ -51,6 +53,9 @@ class DataSyncManager:
     def check_pi_connectivity(self) -> bool:
         """Check if Pi is reachable before attempting sync"""
         try:
+            if Config.PI_LOCAL_MODE and Config.LOCAL_PI_APP_PATH.exists():
+                logger.info("🔍 Pi connectivity check skipped - local mode actief")
+                return True
             # Extract IP from PI_HOST (e.g., "stephang@192.168.1.104" -> "192.168.1.104")
             pi_ip = PI_HOST.split('@')[1] if '@' in PI_HOST else PI_HOST
             

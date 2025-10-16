@@ -174,23 +174,35 @@ class HealthMonitor:
             
             # Load average (Unix systems)
             if hasattr(os, 'getloadavg'):
-                load_avg = os.getloadavg()[0]
-                cpu_count = psutil.cpu_count()
-                load_percent = (load_avg / cpu_count) * 100
-                
-                load_status = HealthStatus.HEALTHY
-                if load_percent > 100:
-                    load_status = HealthStatus.CRITICAL
-                elif load_percent > 80:
-                    load_status = HealthStatus.WARNING
-                
-                checks.append(HealthCheck(
-                    name="load_average",
-                    status=load_status,
-                    message=f"Load average: {load_avg:.2f} ({load_percent:.1f}% of {cpu_count} cores)",
-                    value=load_avg,
-                    threshold=cpu_count
-                ))
+                try:
+                    load_avg = os.getloadavg()[0]
+                    try:
+                        cpu_count = psutil.cpu_count() or os.cpu_count() or 1
+                    except Exception as exc:
+                        logger.warning(f"cpu_count fallback in health monitor: {exc}")
+                        cpu_count = os.cpu_count() or 1
+                    cpu_count = max(cpu_count, 1)
+                    load_percent = (load_avg / cpu_count) * 100
+                    
+                    load_status = HealthStatus.HEALTHY
+                    if load_percent > 100:
+                        load_status = HealthStatus.CRITICAL
+                    elif load_percent > 80:
+                        load_status = HealthStatus.WARNING
+                    
+                    checks.append(HealthCheck(
+                        name="load_average",
+                        status=load_status,
+                        message=f"Load average: {load_avg:.2f} ({load_percent:.1f}% of {cpu_count} cores)",
+                        value=load_avg,
+                        threshold=cpu_count
+                    ))
+                except Exception as exc:
+                    checks.append(HealthCheck(
+                        name="load_average",
+                        status=HealthStatus.WARNING,
+                        message=f"Load average check skipped: {exc}"
+                    ))
             
         except Exception as e:
             checks.append(HealthCheck(
@@ -712,4 +724,3 @@ class HealthMonitor:
             "last_check": self.last_health_check.isoformat() if self.last_health_check else None,
             "health_history_count": len(self.health_history)
         }
-
